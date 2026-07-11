@@ -504,3 +504,4 @@ function Advanced:AntiCheatBypass()
 end
 
 return Advanced
+print("botplayer loaded")
