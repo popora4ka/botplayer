@@ -1,702 +1,506 @@
--- Консоль: rconsolecreate, rconsolesettitle, rconsoleprint, rconsoleclear
--- Используемые сервисы: Players, RunService, UserInputService, VirtualInputManager, TweenService, PathfindingService, ContextActionService, ReplicatedStorage, Workspace, CoreGui
--- Поддерживаемые игры: Murder Mystery 2
+-- MainBot.lua - Основной файл с GUI и циклом бота
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
-local PathfindingService = game:GetService("PathfindingService")
-local ContextActionService = game:GetService("ContextActionService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
-local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse()
 
--- ================== ОСНОВНЫЕ ПЕРЕМЕННЫЕ ==================
+wait(3)
+local LocalPlayer = Players.LocalPlayer
+
+-- Настройки бота
 local Bot = {
     Enabled = false,
     CollectCoins = true,
     AutoVote = true,
-    AutoEscapeMurderer = true,
-    AutoShootSheriff = true,
-    AutoPickupGun = true,
-    AutoPassObstacles = true,
-    AutoClaimDailyReward = true,
-    WalkSpeed = 60,
-    JumpPower = 50,
-    ESPEnabled = true,
-    AutoRejoin = false,
-    AntiAfk = true,
-    GunESP = true,
+    EscapeMurderer = true,
+    AutoShoot = true,
+    PickupGun = true,
     PlayerESP = true,
+    GunESP = true,
     CoinESP = true,
-    LoopTeleport = false,
-    CoinFarmMethod = "Nearest", -- "Nearest" или "Teleport"
-    TargetPlayer = nil,
-    LastVoteTime = 0,
-    LastShootTime = 0,
-    LastPickupTime = 0,
-    Connection = nil,
-    Path = {},
-    CurrentWaypoint = 1,
+    WalkSpeed = 60,
+    LastShoot = 0,
+    LastVote = 0,
+    Connections = {},
     EspObjects = {}
 }
 
-local UIS = nil
-local ScreenGui = nil
-local MainFrame = nil
-local ToggleButton = nil
-local StatusLabel = nil
-local currentRoundState = "Waiting"
-local killedPlayers = {}
-local collectedCoinsThisRound = 0
-local roundStartTime = 0
+-- Безопасный поиск
+local function SafeFind(parent, name)
+    if not parent then return nil end
+    local s, r = pcall(function() return parent:FindFirstChild(name) end)
+    return s and r or nil
+end
 
--- ================== ФУНКЦИИ ИГРОВОГО ПРОЦЕССА ==================
+-- Получение информации об игре
 local function GetGameInfo()
-    local gameInfo = {
-        MapName = "Unknown",
-        RoundActive = false,
-        PlayerCount = #Players:GetPlayers(),
-        Murderer = nil,
-        Sheriff = nil,
-        Innocents = {},
-        Coins = {},
-        Gun = nil,
-        Alive = true,
-        TimeLeft = 0
-    }
+    local info = {Coins = {}, Murderer = nil, Sheriff = nil, Gun = nil, Alive = true}
     
-    -- Поиск карты
-    local mapFolder = Workspace:FindFirstChild("Map") or Workspace:FindFirstChild("Maps")
-    if mapFolder then
-        gameInfo.MapName = mapFolder.Name
-    end
-    
-    -- Поиск монет
-    local coinsFolder = Workspace:FindFirstChild("Coins") or Workspace:FindFirstChild("CoinContainer")
-    if coinsFolder then
-        for _, coin in ipairs(coinsFolder:GetChildren()) do
-            if coin:IsA("BasePart") and coin.Transparency < 0.5 then
-                table.insert(gameInfo.Coins, coin)
+    -- Монеты
+    local coins = SafeFind(Workspace, "Coins")
+    if coins then
+        for _, c in ipairs(coins:GetChildren()) do
+            if c:IsA("BasePart") and c.Transparency < 0.5 then
+                table.insert(info.Coins, c)
             end
         end
     end
     
-    -- Определение ролей
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local character = player.Character
-            if character then
-                local playerInfo = {
-                    Player = player,
-                    Character = character,
-                    Role = "Innocent",
-                    HasGun = false,
-                    Alive = true
-                }
-                
-                -- Проверка на мардера (обычно имеет нож)
-                for _, tool in ipairs(character:GetChildren()) do
-                    if tool:IsA("Tool") then
-                        local toolName = tool.Name:lower()
-                        if toolName:find("knife") or toolName:find("blade") or toolName:find("sword") or toolName:find("murder") then
-                            playerInfo.Role = "Murderer"
-                            gameInfo.Murderer = player
-                        elseif toolName:find("gun") or toolName:find("pistol") or toolName:find("revolver") or toolName:find("sheriff") then
-                            playerInfo.Role = "Sheriff"
-                            playerInfo.HasGun = true
-                            gameInfo.Sheriff = player
-                            gameInfo.Gun = tool
-                        end
-                        break
-                    end
+    -- Роли игроков
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            for _, tool in ipairs(plr.Character:GetChildren()) do
+                if tool:IsA("Tool") then
+                    local n = tool.Name:lower()
+                    if n:find("knife") then info.Murderer = plr
+                    elseif n:find("gun") then info.Sheriff = plr; info.Gun = tool end
                 end
-                
-                table.insert(gameInfo.Innocents, playerInfo)
             end
         end
     end
     
-    -- Проверка жив ли игрок
-    local localChar = LocalPlayer.Character
-    gameInfo.Alive = localChar and localChar:FindFirstChild("Humanoid") and localChar.Humanoid.Health > 0
-    
-    -- Определение активного раунда
-    local roundFolder = Workspace:FindFirstChild("RoundInfo") or Workspace:FindFirstChild("GameInfo")
-    if roundFolder then
-        local active = roundFolder:FindFirstChild("Active") or roundFolder:FindFirstChild("InRound")
-        if active then
-            gameInfo.RoundActive = active.Value
-        end
-        local timer = roundFolder:FindFirstChild("TimeLeft") or roundFolder:FindFirstChild("Timer")
-        if timer then
-            gameInfo.TimeLeft = timer.Value
-        end
+    -- Жив ли игрок
+    local char = LocalPlayer.Character
+    if char then
+        local hum = SafeFind(char, "Humanoid")
+        info.Alive = hum and hum.Health > 0
     end
     
-    return gameInfo
+    return info
 end
 
-local function GetNearestCoin()
-    local localChar = LocalPlayer.Character
-    if not localChar or not localChar:FindFirstChild("HumanoidRootPart") then return nil end
-    
-    local rootPart = localChar.HumanoidRootPart
-    local nearestCoin = nil
-    local nearestDistance = math.huge
-    
-    local gameInfo = GetGameInfo()
-    for _, coin in ipairs(gameInfo.Coins) do
-        if coin and coin.Parent then
-            local distance = (coin.Position - rootPart.Position).Magnitude
-            if distance < nearestDistance then
-                nearestDistance = distance
-                nearestCoin = coin
-            end
-        end
-    end
-    
-    return nearestCoin
-end
-
-local function MoveToPosition(position)
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("Humanoid") then return end
-    
-    local humanoid = character:FindFirstChild("Humanoid")
-    humanoid:MoveTo(position)
-end
-
-local function TweenToPosition(position, speed)
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    
-    local rootPart = character.HumanoidRootPart
-    local distance = (position - rootPart.Position).Magnitude
-    local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    
-    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = CFrame.new(position)})
-    tween:Play()
-    
-    return tween
-end
-
+-- Движение к монете
 local function CollectCoin(coin)
-    if not coin or not coin.Parent then return false end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = SafeFind(char, "HumanoidRootPart")
+    if not root then return end
     
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return false end
-    
-    local rootPart = character.HumanoidRootPart
-    
-    -- Используем твин для подхода к монете
-    local tween = TweenToPosition(coin.Position, Bot.WalkSpeed)
+    local tween = TweenService:Create(root, TweenInfo.new((coin.Position - root.Position).Magnitude / Bot.WalkSpeed), {CFrame = CFrame.new(coin.Position)})
+    tween:Play()
     tween.Completed:Wait()
     
-    -- Симуляция сбора монеты через касание
-    firetouchinterest(rootPart, coin, 0)
-    wait(0.1)
-    firetouchinterest(rootPart, coin, 1)
+    pcall(function()
+        firetouchinterest(root, coin, 0)
+        wait(0.1)
+        firetouchinterest(root, coin, 1)
+    end)
+end
+
+-- Побег от мардера
+local function EscapeFromMurderer(murderer)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local localRoot = SafeFind(char, "HumanoidRootPart")
+    local murdRoot = SafeFind(murderer.Character, "HumanoidRootPart")
+    if not localRoot or not murdRoot then return end
     
-    collectedCoinsThisRound = collectedCoinsThisRound + 1
-    return true
-end
-
-local function FindMurderer()
-    local gameInfo = GetGameInfo()
-    return gameInfo.Murderer
-end
-
-local function FindGun()
-    local gun = Workspace:FindFirstChild("Gun") or Workspace:FindFirstChild("SheriffGun")
-    if not gun then
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("Tool") and (obj.Name:lower():find("gun") or obj.Name:lower():find("pistol") or obj.Name:lower():find("revolver")) then
-                return obj
-            end
-        end
+    if (localRoot.Position - murdRoot.Position).Magnitude < 30 then
+        local escape = localRoot.Position + (localRoot.Position - murdRoot.Position).Unit * 50
+        TweenService:Create(localRoot, TweenInfo.new(0.5), {CFrame = CFrame.new(escape)}):Play()
     end
-    return gun
 end
 
+-- Выстрел
 local function ShootAtPlayer(player)
-    if not player or not player.Character then return end
-    if time() - Bot.LastShootTime < 0.5 then return end -- Защита от спама
+    if time() - Bot.LastShoot < 0.5 then return end
+    Bot.LastShoot = time()
     
-    Bot.LastShootTime = time()
-    
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    -- Поиск оружия в инвентаре
-    for _, tool in ipairs(character:GetChildren()) do
-        if tool:IsA("Tool") and (tool.Name:lower():find("gun") or tool.Name:lower():find("pistol")) then
-            -- Наводимся на цель
-            local targetChar = player.Character
-            if targetChar and targetChar:FindFirstChild("Head") then
-                local targetPos = targetChar.Head.Position
-                local mousePos = targetPos
-                
-                -- Симуляция клика для выстрела
-                tool:Activate()
-                wait(0.1)
-                tool:Deactivate()
-                
-                return true
-            end
+    local char = LocalPlayer.Character
+    if not char then return end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and tool.Name:lower():find("gun") then
+            pcall(function() tool:Activate() wait(0.1) tool:Deactivate() end)
+            return
         end
     end
-    return false
 end
 
-local function VoteForMap(mapName)
-    if not Bot.AutoVote or time() - Bot.LastVoteTime < 5 then return end
+-- Голосование
+local function VoteForMap()
+    if time() - Bot.LastVote < 5 then return end
+    Bot.LastVote = time()
     
-    Bot.LastVoteTime = time()
+    local maps = {"Bank", "Hotel", "House", "Hospital", "School"}
+    local map = maps[math.random(#maps)]
     
-    -- Поиск GUI голосования
-    local votingGui = LocalPlayer.PlayerGui:FindFirstChild("VotingGui") or 
-                     LocalPlayer.PlayerGui:FindFirstChild("VoteGui") or
-                     LocalPlayer.PlayerGui:FindFirstChild("MapVote")
-    
-    if votingGui then
-        for _, child in ipairs(votingGui:GetDescendants()) do
-            if child:IsA("TextButton") and child.Text:lower():find(mapName:lower()) then
-                -- Активация кнопки
-                local args = {
-                    [1] = mapName
-                }
-                
-                -- Пробуем разные методы активации
-                pcall(function()
-                    game:GetService("ReplicatedStorage").Remotes.VoteMap:FireServer(mapName)
-                end)
-                
-                pcall(function()
-                    game:GetService("ReplicatedStorage").Events.Vote:FireServer(mapName)
-                end)
-                
-                return true
-            end
+    pcall(function()
+        local remotes = SafeFind(game:GetService("ReplicatedStorage"), "Remotes")
+        if remotes then
+            local vote = SafeFind(remotes, "VoteMap")
+            if vote then vote:FireServer(map) end
         end
-    end
-    
-    return false
+    end)
 end
 
-local function JumpOverObstacle(obstacle)
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("Humanoid") then return end
-    
-    local humanoid = character.Humanoid
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-    
-    -- Определяем высоту препятствия
-    local obstacleHeight = obstacle.Size.Y
-    local obstaclePos = obstacle.Position
-    
-    -- Подходим к препятствию
-    MoveToPosition(Vector3.new(obstaclePos.X, rootPart.Position.Y, obstaclePos.Z))
-    wait(0.5)
-    
-    -- Прыжок
-    humanoid.Jump = true
-    
-    -- Если высокое, делаем двойной прыжок
-    if obstacleHeight > 4 then
-        wait(0.3)
-        humanoid.Jump = true
-    end
-    
-    return true
-end
-
-local function EscapeFromMurderer()
-    local murderer = FindMurderer()
-    if not murderer or not murderer.Character then return end
-    
-    local localChar = LocalPlayer.Character
-    if not localChar or not localChar:FindFirstChild("HumanoidRootPart") then return end
-    
-    local murdererRoot = murderer.Character:FindFirstChild("HumanoidRootPart")
-    if not murdererRoot then return end
-    
-    local distance = (localChar.HumanoidRootPart.Position - murdererRoot.Position).Magnitude
-    
-    -- Если мардер близко, убегаем
-    if distance < 30 then
-        local escapeDirection = (localChar.HumanoidRootPart.Position - murdererRoot.Position).Unit
-        local escapePosition = localChar.HumanoidRootPart.Position + escapeDirection * 50
-        
-        -- Находим ближайшее укрытие
-        local bestEscape = escapePosition
-        local obstacles = {}
-        
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and obj.Size.Magnitude > 5 and obj.Transparency < 0.5 then
-                table.insert(obstacles, obj)
-            end
-        end
-        
-        if #obstacles > 0 then
-            -- Выбираем самое дальнее от мардера укрытие
-            local maxDist = 0
-            for _, obs in ipairs(obstacles) do
-                local dist = (obs.Position - murdererRoot.Position).Magnitude
-                if dist > maxDist then
-                    maxDist = dist
-                    bestEscape = obs.Position
-                end
-            end
-        end
-        
-        TweenToPosition(bestEscape, Bot.WalkSpeed * 1.5)
-        return true
-    end
-    
-    return false
-end
-
-local function CollectNearestCoins()
-    if not Bot.CollectCoins then return end
-    
-    local coin = GetNearestCoin()
-    if coin then
-        CollectCoin(coin)
-        return true
-    end
-    return false
-end
-
-local function CheckAndPassObstacles()
-    if not Bot.AutoPassObstacles then return end
-    
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    
-    local rootPart = character.HumanoidRootPart
-    local rayLength = 5
-    
-    -- Проверка препятствия впереди
-    local rayOrigin = rootPart.Position
-    local rayDirection = rootPart.CFrame.LookVector * rayLength
-    
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = {character}
-    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local raycastResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
-    
-    if raycastResult and raycastResult.Instance then
-        local obstacle = raycastResult.Instance
-        if obstacle:IsA("BasePart") and obstacle.Size.Y > 2 then
-            JumpOverObstacle(obstacle)
-            return true
-        end
-    end
-    
-    return false
-end
-
--- ================== ESP ФУНКЦИИ ==================
-local function CreateESP(target, color, name)
-    if not Bot.ESPEnabled then return end
-    
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "BotESP_" .. name
-    highlight.FillColor = color
-    highlight.FillTransparency = 0.5
-    highlight.OutlineColor = Color3.new(1, 1, 1)
-    highlight.OutlineTransparency = 0
-    highlight.Parent = target
-    
-    table.insert(Bot.EspObjects, highlight)
-    return highlight
-end
-
-local function ClearESP()
+-- Обновление ESP
+local function UpdateESP()
     for _, obj in ipairs(Bot.EspObjects) do
-        if obj and obj.Parent then
-            obj:Destroy()
-        end
+        pcall(function() obj:Destroy() end)
     end
     Bot.EspObjects = {}
-end
-
-local function UpdateESP()
-    ClearESP()
     
-    local gameInfo = GetGameInfo()
+    local info = GetGameInfo()
     
-    -- ESP для игроков
+    -- ESP игроков
     if Bot.PlayerESP then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                local color
-                if player == gameInfo.Murderer then
-                    color = Color3.new(1, 0, 0) -- Красный для мардера
-                elseif player == gameInfo.Sheriff then
-                    color = Color3.new(0, 0, 1) -- Синий для шерифа
-                else
-                    color = Color3.new(0, 1, 0) -- Зеленый для невинных
-                end
-                CreateESP(player.Character, color, player.Name)
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                local color = plr == info.Murderer and Color3.new(1,0,0) or (plr == info.Sheriff and Color3.new(0,0,1) or Color3.new(0,1,0))
+                local hl = Instance.new("Highlight")
+                hl.FillColor = color
+                hl.Parent = plr.Character
+                table.insert(Bot.EspObjects, hl)
             end
         end
     end
     
-    -- ESP для оружия
-    if Bot.GunESP then
-        local gun = FindGun()
-        if gun then
-            CreateESP(gun, Color3.new(1, 1, 0), "SheriffGun")
-        end
+    -- ESP оружия
+    if Bot.GunESP and info.Gun then
+        local hl = Instance.new("Highlight")
+        hl.FillColor = Color3.new(1,1,0)
+        hl.Parent = info.Gun
+        table.insert(Bot.EspObjects, hl)
     end
     
-    -- ESP для монет
+    -- ESP монет
     if Bot.CoinESP then
-        for _, coin in ipairs(gameInfo.Coins) do
-            CreateESP(coin, Color3.new(1, 1, 0), "Coin")
+        for _, coin in ipairs(info.Coins) do
+            local hl = Instance.new("Highlight")
+            hl.FillColor = Color3.new(1,1,0)
+            hl.Parent = coin
+            table.insert(Bot.EspObjects, hl)
         end
     end
 end
 
--- ================== GUI СОЗДАНИЕ ==================
+-- Основной цикл
+local function MainLoop()
+    if not Bot.Enabled then return end
+    
+    local info = GetGameInfo()
+    
+    -- Сбор монет
+    if Bot.CollectCoins and info.Alive then
+        local nearest = nil
+        local minDist = math.huge
+        local char = LocalPlayer.Character
+        if char then
+            local root = SafeFind(char, "HumanoidRootPart")
+            if root then
+                for _, coin in ipairs(info.Coins) do
+                    local dist = (coin.Position - root.Position).Magnitude
+                    if dist < minDist then minDist = dist; nearest = coin end
+                end
+                if nearest then CollectCoin(nearest) end
+            end
+        end
+    end
+    
+    -- Побег от мардера
+    if Bot.EscapeMurderer and info.Murderer and info.Alive then
+        EscapeFromMurderer(info.Murderer)
+    end
+    
+    -- Авто-шут за шерифа
+    if Bot.AutoShoot and info.Sheriff == LocalPlayer and info.Murderer then
+        ShootAtPlayer(info.Murderer)
+    end
+    
+    -- Голосование
+    if Bot.AutoVote then VoteForMap() end
+end
+
+-- GUI
 local function CreateGUI()
-    ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "MM2BotGUI"
-    ScreenGui.Parent = CoreGui
-    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "MM2Bot"
+    gui.Parent = CoreGui
+    gui.ResetOnSpawn = false
     
-    MainFrame = Instance.new("Frame")
-    MainFrame.Name = "MainFrame"
-    MainFrame.Parent = ScreenGui
-    MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    MainFrame.BorderSizePixel = 0
-    MainFrame.Position = UDim2.new(0.7, 0, 0.5, 0)
-    MainFrame.Size = UDim2.new(0, 250, 0, 400)
-    MainFrame.Active = true
-    MainFrame.Draggable = true
+    local frame = Instance.new("Frame")
+    frame.Parent = gui
+    frame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    frame.Position = UDim2.new(0.7,0,0.3,0)
+    frame.Size = UDim2.new(0,220,0,350)
+    frame.Active = true
+    frame.Draggable = true
     
-    local TitleBar = Instance.new("TextLabel")
-    TitleBar.Name = "TitleBar"
-    TitleBar.Parent = MainFrame
-    TitleBar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-    TitleBar.BorderSizePixel = 0
-    TitleBar.Size = UDim2.new(1, 0, 0, 30)
-    TitleBar.Font = Enum.Font.GothamBold
-    TitleBar.Text = "MM2 Bot by Ryzen"
-    TitleBar.TextColor3 = Color3.new(1, 1, 1)
-    TitleBar.TextSize = 16
+    -- Заголовок
+    local title = Instance.new("TextLabel")
+    title.Parent = frame
+    title.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    title.Size = UDim2.new(1,0,0,25)
+    title.Text = "MM2 Bot"
+    title.TextColor3 = Color3.new(1,1,1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 14
     
-    local TitleBarClose = Instance.new("TextButton")
-    TitleBarClose.Name = "TitleBarClose"
-    TitleBarClose.Parent = TitleBar
-    TitleBarClose.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-    TitleBarClose.BorderSizePixel = 0
-    TitleBarClose.Position = UDim2.new(1, -30, 0, 0)
-    TitleBarClose.Size = UDim2.new(0, 30, 0, 30)
-    TitleBarClose.Font = Enum.Font.GothamBold
-    TitleBarClose.Text = "X"
-    TitleBarClose.TextColor3 = Color3.new(1, 1, 1)
-    TitleBarClose.TextSize = 16
-    TitleBarClose.MouseButton1Click:Connect(function()
-        ScreenGui:Destroy()
-    end)
+    -- Статус
+    local status = Instance.new("TextLabel")
+    status.Parent = frame
+    status.Position = UDim2.new(0.05,0,0.1,0)
+    status.Size = UDim2.new(0.9,0,0,30)
+    status.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    status.Text = "Status: OFF"
+    status.TextColor3 = Color3.new(1,0,0)
+    status.Font = Enum.Font.Gotham
+    status.TextSize = 12
     
-    StatusLabel = Instance.new("TextLabel")
-    StatusLabel.Name = "StatusLabel"
-    StatusLabel.Parent = MainFrame
-    StatusLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    StatusLabel.BorderSizePixel = 0
-    StatusLabel.Position = UDim2.new(0.05, 0, 0.1, 0)
-    StatusLabel.Size = UDim2.new(0.9, 0, 0, 40)
-    StatusLabel.Font = Enum.Font.GothamBold
-    StatusLabel.Text = "Bot Status: OFF"
-    StatusLabel.TextColor3 = Color3.new(1, 0, 0)
-    StatusLabel.TextSize = 14
-    
-    local yPos = 0.22
-    local function CreateToggle(name, default, callback)
-        local label = Instance.new("TextLabel")
-        label.Name = name .. "Label"
-        label.Parent = MainFrame
-        label.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        label.BorderSizePixel = 0
-        label.Position = UDim2.new(0.05, 0, yPos, 0)
-        label.Size = UDim2.new(0.6, 0, 0, 30)
-        label.Font = Enum.Font.Gotham
-        label.Text = name
-        label.TextColor3 = Color3.new(1, 1, 1)
-        label.TextSize = 12
+    -- Создание переключателей
+    local y = 0.2
+    local function AddToggle(name, default, callback)
+        local lbl = Instance.new("TextLabel")
+        lbl.Parent = frame
+        lbl.BackgroundColor3 = Color3.fromRGB(40,40,40)
+        lbl.Position = UDim2.new(0.05,0,y,0)
+        lbl.Size = UDim2.new(0.55,0,0,25)
+        lbl.Text = name
+        lbl.TextColor3 = Color3.new(1,1,1)
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextSize = 11
         
-        local button = Instance.new("TextButton")
-        button.Name = name .. "Button"
-        button.Parent = MainFrame
-        button.BackgroundColor3 = default and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-        button.BorderSizePixel = 0
-        button.Position = UDim2.new(0.7, 0, yPos, 0)
-        button.Size = UDim2.new(0.25, 0, 0, 30)
-        button.Font = Enum.Font.GothamBold
-        button.Text = default and "ON" or "OFF"
-        button.TextColor3 = Color3.new(1, 1, 1)
-        button.TextSize = 12
+        local btn = Instance.new("TextButton")
+        btn.Parent = frame
+        btn.BackgroundColor3 = default and Color3.new(0,1,0) or Color3.new(1,0,0)
+        btn.Position = UDim2.new(0.65,0,y,0)
+        btn.Size = UDim2.new(0.3,0,0,25)
+        btn.Text = default and "ON" or "OFF"
+        btn.TextColor3 = Color3.new(1,1,1)
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 11
         
-        button.MouseButton1Click:Connect(function()
-            local newState = button.Text == "OFF"
-            button.Text = newState and "ON" or "OFF"
-            button.BackgroundColor3 = newState and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-            callback(newState)
+        btn.MouseButton1Click:Connect(function()
+            local state = btn.Text == "OFF"
+            btn.Text = state and "ON" or "OFF"
+            btn.BackgroundColor3 = state and Color3.new(0,1,0) or Color3.new(1,0,0)
+            callback(state)
         end)
         
-        yPos = yPos + 0.09
-        return button
+        y = y + 0.08
     end
     
-    ToggleButton = CreateToggle("Enable Bot", Bot.Enabled, function(state)
-        Bot.Enabled = state
-        StatusLabel.Text = "Bot Status: " .. (state and "ON" or "OFF")
-        StatusLabel.TextColor3 = state and Color3.new(0, 1, 0) or Color3.new(1, 0, 0)
-        if state then
-            StartBot()
+    -- Кнопка вкл/выкл бота
+    local mainBtn = Instance.new("TextButton")
+    mainBtn.Parent = frame
+    mainBtn.BackgroundColor3 = Color3.new(1,0,0)
+    mainBtn.Position = UDim2.new(0.05,0,0.85,0)
+    mainBtn.Size = UDim2.new(0.9,0,0,40)
+    mainBtn.Text = "ENABLE BOT"
+    mainBtn.TextColor3 = Color3.new(1,1,1)
+    mainBtn.Font = Enum.Font.GothamBold
+    mainBtn.TextSize = 16
+    
+    mainBtn.MouseButton1Click:Connect(function()
+        Bot.Enabled = not Bot.Enabled
+        if Bot.Enabled then
+            mainBtn.Text = "DISABLE BOT"
+            mainBtn.BackgroundColor3 = Color3.new(0,1,0)
+            status.Text = "Status: ON"
+            status.TextColor3 = Color3.new(0,1,0)
+            Bot.Connections.Main = RunService.RenderStepped:Connect(MainLoop)
+            Bot.Connections.ESP = RunService.RenderStepped:Connect(UpdateESP)
         else
-            StopBot()
+            mainBtn.Text = "ENABLE BOT"
+            mainBtn.BackgroundColor3 = Color3.new(1,0,0)
+            status.Text = "Status: OFF"
+            status.TextColor3 = Color3.new(1,0,0)
+            for _, c in pairs(Bot.Connections) do pcall(function() c:Disconnect() end) end
+            Bot.Connections = {}
         end
     end)
     
-    CreateToggle("Collect Coins", Bot.CollectCoins, function(state)
-        Bot.CollectCoins = state
-    end)
-    
-    CreateToggle("Auto Vote", Bot.AutoVote, function(state)
-        Bot.AutoVote = state
-    end)
-    
-    CreateToggle("Escape Murderer", Bot.AutoEscapeMurderer, function(state)
-        Bot.AutoEscapeMurderer = state
-    end)
-    
-    CreateToggle("Auto Shoot", Bot.AutoShootSheriff, function(state)
-        Bot.AutoShootSheriff = state
-    end)
-    
-    CreateToggle("Pickup Gun", Bot.AutoPickupGun, function(state)
-        Bot.AutoPickupGun = state
-    end)
-    
-    CreateToggle("Pass Obstacles", Bot.AutoPassObstacles, function(state)
-        Bot.AutoPassObstacles = state
-    end)
-    
-    CreateToggle("Player ESP", Bot.PlayerESP, function(state)
-        Bot.PlayerESP = state
-        UpdateESP()
-    end)
-    
-    CreateToggle("Gun ESP", Bot.GunESP, function(state)
-        Bot.GunESP = state
-        UpdateESP()
-    end)
-    
-    CreateToggle("Coin ESP", Bot.CoinESP, function(state)
-        Bot.CoinESP = state
-        UpdateESP()
-    end)
+    AddToggle("Collect Coins", true, function(s) Bot.CollectCoins = s end)
+    AddToggle("Auto Vote", true, function(s) Bot.AutoVote = s end)
+    AddToggle("Escape Murderer", true, function(s) Bot.EscapeMurderer = s end)
+    AddToggle("Auto Shoot", true, function(s) Bot.AutoShoot = s end)
+    AddToggle("Player ESP", true, function(s) Bot.PlayerESP = s end)
+    AddToggle("Gun ESP", true, function(s) Bot.GunESP = s end)
+    AddToggle("Coin ESP", true, function(s) Bot.CoinESP = s end)
 end
 
--- ================== ОСНОВНОЙ ЦИКЛ БОТА ==================
-local function StartBot()
-    if Bot.Connection then return end
+-- AdvancedFeatures.lua - Продвинутые функции бота
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+
+local Advanced = {}
+
+-- Авто-подбор оружия
+function Advanced:AutoPickupGun()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
     
-    Bot.Connection = RunService.RenderStepped:Connect(function()
-        if not Bot.Enabled then return end
-        
-        local gameInfo = GetGameInfo()
-        
-        -- Обновление ESP
-        UpdateESP()
-        
-        -- Сбор монет
-        if Bot.CollectCoins and gameInfo.Alive then
-            CollectNearestCoins()
-        end
-        
-        -- Побег от мардера
-        if Bot.AutoEscapeMurderer and gameInfo.Murderer and gameInfo.Alive then
-            EscapeFromMurderer()
-        end
-        
-        -- Автоматическая стрельба за шерифа
-        if Bot.AutoShootSheriff and gameInfo.Sheriff == LocalPlayer and gameInfo.Murderer then
-            local localChar = LocalPlayer.Character
-            if localChar then
-                -- Поиск оружия
-                local hasGun = false
-                for _, tool in ipairs(localChar:GetChildren()) do
-                    if tool:IsA("Tool") and (tool.Name:lower():find("gun") or tool.Name:lower():find("pistol")) then
-                        hasGun = true
-                        break
-                    end
-                end
-                
-                if hasGun then
-                    ShootAtPlayer(gameInfo.Murderer)
-                elseif Bot.AutoPickupGun then
-                    -- Подбор оружия
-                    local gun = FindGun()
-                    if gun and time() - Bot.LastPickupTime > 2 then
-                        Bot.LastPickupTime = time()
-                        local distance = (localChar.HumanoidRootPart.Position - gun.Position).Magnitude
-                        if distance < 50 then
-                            TweenToPosition(gun.Position, Bot.WalkSpeed)
-                        end
-                    end
-                end
+    -- Ищем оружие на карте
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Tool") and obj.Name:lower():find("gun") then
+            local dist = (obj.Position - root.Position).Magnitude
+            if dist < 50 then
+                local tween = TweenService:Create(root, TweenInfo.new(dist/60), {CFrame = CFrame.new(obj.Position)})
+                tween:Play()
+                tween.Completed:Wait()
+                return true
             end
         end
-        
-        -- Прохождение препятствий
-        if Bot.AutoPassObstacles and gameInfo.Alive then
-            CheckAndPassObstacles()
+    end
+    return false
+end
+
+-- Прохождение препятствий
+function Advanced:PassObstacles()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChild("Humanoid")
+    if not root or not hum then return end
+    
+    -- Проверка препятствий впереди
+    local rayOrigin = root.Position
+    local rayDir = root.CFrame.LookVector * 5
+    
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {char}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local result = Workspace:Raycast(rayOrigin, rayDir, params)
+    
+    if result and result.Instance:IsA("BasePart") and result.Instance.Size.Y > 2 then
+        hum.Jump = true
+        if result.Instance.Size.Y > 4 then
+            wait(0.3)
+            hum.Jump = true
         end
-        
-        -- Голосование за карту
-        if Bot.AutoVote and not gameInfo.RoundActive then
-            VoteForMap("Bank") -- Можно изменить на любую карту
+    end
+end
+
+-- Телепорт к монетам
+function Advanced:TeleportToCoins()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    local coins = Workspace:FindFirstChild("Coins")
+    if not coins then return end
+    
+    for _, coin in ipairs(coins:GetChildren()) do
+        if coin:IsA("BasePart") and coin.Transparency < 0.5 then
+            root.CFrame = CFrame.new(coin.Position + Vector3.new(0,3,0))
+            wait(0.1)
+            pcall(function()
+                firetouchinterest(root, coin, 0)
+                firetouchinterest(root, coin, 1)
+            end)
+        end
+    end
+end
+
+-- Анти-АФК
+function Advanced:AntiAFK()
+    local VirtualInputManager = game:GetService("VirtualInputManager")
+    
+    spawn(function()
+        while true do
+            wait(60)
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, nil)
+                wait(0.1)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, nil)
+            end)
         end
     end)
 end
 
-local function StopBot()
-    if Bot.Connection then
-        Bot.Connection:Disconnect()
-        Bot.Connection = nil
-    end
-    ClearESP()
+-- Авто-реконнект
+function Advanced:AutoRejoin()
+    local TeleportService = game:GetService("TeleportService")
+    local placeId = game.PlaceId
+    
+    spawn(function()
+        while true do
+            wait(300) -- Проверка каждые 5 минут
+            if #Players:GetPlayers() < 4 then -- Мало игроков
+                pcall(function()
+                    TeleportService:Teleport(placeId, LocalPlayer)
+                end)
+            end
+        end
+    end)
 end
 
--- ================== ИНИЦИАЛИЗАЦИЯ ==================
-CreateGUI()
-
--- Автоматический запуск ESP при спавне
-LocalPlayer.CharacterAdded:Connect(function(character)
-    wait(1)
-    UpdateESP()
-end)
-
--- Очистка при выходе
-game:GetService("Players").LocalPlayer.OnPlayerRemoving:Connect(function()
-    StopBot()
-    if ScreenGui then
-        ScreenGui:Destroy()
+-- Авто-получение наград
+function Advanced:ClaimRewards()
+    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not gui then return end
+    
+    -- Поиск кнопки наград
+    for _, obj in ipairs(gui:GetDescendants()) do
+        if obj:IsA("TextButton") then
+            local text = obj.Text:lower()
+            if text:find("claim") or text:find("reward") or text:find("daily") then
+                pcall(function()
+                    local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+                    if remotes then
+                        local claim = remotes:FindFirstChild("ClaimReward")
+                        if claim then claim:FireServer() end
+                    end
+                end)
+            end
+        end
     end
-end)
+end
 
-print("MM2 Bot by Ryzen loaded successfully!")
-print("Use the GUI panel to control bot features.")
-```
+-- Фарм с телепортом
+function Advanced:TeleportFarm()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    local coins = Workspace:FindFirstChild("Coins")
+    if not coins then return end
+    
+    local coinList = {}
+    for _, coin in ipairs(coins:GetChildren()) do
+        if coin:IsA("BasePart") then
+            table.insert(coinList, coin)
+        end
+    end
+    
+    for _, coin in ipairs(coinList) do
+        if not coin.Parent then continue end
+        root.CFrame = CFrame.new(coin.Position + Vector3.new(0,2,0))
+        wait(0.2)
+        pcall(function()
+            firetouchinterest(root, coin, 0)
+            wait(0.1)
+            firetouchinterest(root, coin, 1)
+        end)
+    end
+end
+
+-- Обход анти-чита
+function Advanced:AntiCheatBypass()
+    -- Отключаем обнаружение
+    local det = Workspace:FindFirstChild("AntiCheat")
+    if det then
+        pcall(function()
+            det:Destroy()
+        end)
+    end
+    
+    -- Скрываем GUI от обнаружения
+    local gui = game:GetService("CoreGui"):FindFirstChild("MM2Bot")
+    if gui then
+        gui.Name = tostring(math.random(1000000))
+        gui.ResetOnSpawn = false
+    end
+end
+
+return Advanced
