@@ -1,9 +1,3 @@
---[[
-    MM2 Advanced Human Emulator v3.0
-    Полноценная имитация игрока с продвинутым ИИ
-    Системы: Memory, Personality, Emotions, Decision Making, Social Intelligence
---]]
-
 -- ===== СЕРВИСЫ =====
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
