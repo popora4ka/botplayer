@@ -1,4 +1,4 @@
-ts file was generated at discord.gg/25ms
+--ts file was generated at discord.gg/25ms
 local vu1 =
 loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/
 download/main.lua"))()
