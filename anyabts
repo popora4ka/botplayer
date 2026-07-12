@@ -1,5 +1,5 @@
 local vu1 =
-loadstring(game:HttpGet('https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/main_example.lua'))()
+loadstring(game:HttpGet('https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/main.client.lua'))()
 task.spawn(function()
 pcall(function()
 loadstring(game:HttpGet("https://raw.githubusercontent.com/n9owns/Files/
