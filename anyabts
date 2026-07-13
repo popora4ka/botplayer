@@ -1,6 +1,6 @@
 -- Woloko Hub - MM2 Script
 -- Credits: Woloko Team
--- Version: 1.0
+-- Version: 2.0 (Underground Farm Added)
 
 local vu1 = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
@@ -17,6 +17,7 @@ local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local Colors = {
     Woloko = Color3.fromHex("#FF6B00"),
@@ -89,7 +90,7 @@ repeat task.wait() until isReady
 
 local Window = vu1:CreateWindow({
     Title = GradientText("Woloko Hub", Colors.Woloko, Colors.DarkWoloko),
-    Author = "by Woloko Team | Premium Edition",
+    Author = "by Woloko Team | Premium Edition v2.0",
     Folder = "WolokoHub",
     Icon = "crown",
     NewElements = true,
@@ -144,6 +145,16 @@ local dupeAmount = 1
 local fromWeapon = ""
 local toWeapon = ""
 local configName = "default"
+
+-- ===== UNDERGROUND AUTOFARM VARIABLES =====
+local undergroundFarm = false
+local undergroundMode = "Coins" -- "Coins" or "Candy"
+local undergroundSpeed = 15
+local undergroundBodyPosition = nil
+local undergroundBodyGyro = nil
+local undergroundActive = false
+local undergroundCollectCount = 0
+local undergroundLayer = -50
 
 -- ===== CORE FUNCTIONS =====
 local function GetRole(player)
@@ -235,6 +246,244 @@ local function UpdateESP()
     end
 end
 
+-- ===== UNDERGROUND AUTOFARM CORE =====
+local function GetUndergroundTargets()
+    local targets = {}
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return targets end
+    
+    for _, child in ipairs(Workspace:GetChildren()) do
+        if child:FindFirstChild("CoinContainer") then
+            for _, coin in ipairs(child.CoinContainer:GetChildren()) do
+                if coin:IsA("BasePart") and coin:FindFirstChild("TouchInterest") then
+                    if undergroundMode == "Coins" then
+                        table.insert(targets, coin)
+                    elseif undergroundMode == "Candy" and coin:GetAttribute("CoinID") == "Candy" then
+                        table.insert(targets, coin)
+                    end
+                end
+            end
+        end
+    end
+    
+    if undergroundMode == "Candy" then
+        for _, descendant in ipairs(Workspace:GetDescendants()) do
+            if descendant:IsA("BasePart") and descendant.Name == "candy" and descendant:FindFirstChild("TouchInterest") then
+                table.insert(targets, descendant)
+            end
+        end
+    end
+    
+    return targets
+end
+
+local function GetClosestUndergroundTarget()
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return nil, math.huge end
+    
+    local targets = GetUndergroundTargets()
+    local closest = nil
+    local closestDist = math.huge
+    
+    for _, target in ipairs(targets) do
+        if target and target:IsA("BasePart") then
+            local dist = (root.Position - target.Position).Magnitude
+            if dist < closestDist then
+                closest = target
+                closestDist = dist
+            end
+        end
+    end
+    
+    return closest, closestDist
+end
+
+local function TeleportUnderground()
+    if not undergroundFarm then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not root or not humanoid then return end
+    
+    -- Проваливаемся под карту
+    local underPos = root.Position + Vector3.new(0, undergroundLayer, 0)
+    root.CFrame = CFrame.new(underPos)
+    
+    -- Ложимся на спину (поза "—")
+    root.CFrame = root.CFrame * CFrame.Angles(math.rad(90), 0, 0)
+    
+    -- Создаём BodyPosition для удержания под картой
+    if undergroundBodyPosition then
+        undergroundBodyPosition:Destroy()
+    end
+    if undergroundBodyGyro then
+        undergroundBodyGyro:Destroy()
+    end
+    
+    undergroundBodyPosition = Instance.new("BodyPosition")
+    undergroundBodyPosition.MaxForce = Vector3.new(100000, 100000, 100000)
+    undergroundBodyPosition.P = 2000
+    undergroundBodyPosition.D = 500
+    undergroundBodyPosition.Position = root.Position + Vector3.new(0, -5, 0)
+    undergroundBodyPosition.Parent = root
+    
+    undergroundBodyGyro = Instance.new("BodyGyro")
+    undergroundBodyGyro.MaxTorque = Vector3.new(100000, 100000, 100000)
+    undergroundBodyGyro.P = 2000
+    undergroundBodyGyro.D = 500
+    undergroundBodyGyro.CFrame = CFrame.new(root.Position) * CFrame.Angles(math.rad(90), 0, 0)
+    undergroundBodyGyro.Parent = root
+    
+    humanoid.PlatformStand = true
+    humanoid.Sit = true
+    
+    undergroundActive = true
+    
+    Window:Notify({
+        Title = "Underground Farm",
+        Content = "Teleported underground! Collecting " .. undergroundMode,
+        Icon = "arrow-down",
+        Duration = 3
+    })
+end
+
+local function UndergroundCollectLoop()
+    while undergroundFarm and undergroundActive do
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+        
+        if not char or not root or not humanoid then
+            undergroundActive = false
+            break
+        end
+        
+        -- Удерживаем позу лёжа
+        root.CFrame = CFrame.new(root.Position) * CFrame.Angles(math.rad(90), 0, 0)
+        humanoid.Sit = true
+        humanoid.PlatformStand = true
+        
+        -- Ищем ближайшую цель
+        local target, dist = GetClosestUndergroundTarget()
+        
+        if target then
+            -- Двигаемся к цели (под картой)
+            local targetPos = target.Position + Vector3.new(0, -2, 0)
+            local diff = targetPos - root.Position
+            local distance = diff.Magnitude
+            
+            if distance > 3 then
+                -- Плавное перемещение
+                local direction = diff.Unit
+                local newPos = root.Position + direction * math.min(undergroundSpeed, distance)
+                root.CFrame = CFrame.new(newPos) * CFrame.Angles(math.rad(90), 0, 0)
+            end
+            
+            -- Обновляем BodyPosition
+            if undergroundBodyPosition then
+                undergroundBodyPosition.Position = root.Position + Vector3.new(0, -5, 0)
+            end
+            
+            -- Проверяем, собрали ли мы цель
+            if distance < 5 then
+                -- Цель должна собраться автоматически через TouchInterest
+                undergroundCollectCount = undergroundCollectCount + 1
+            end
+            
+            task.wait(0.05)
+        else
+            -- Если целей нет, просто лежим под картой
+            task.wait(0.5)
+        end
+        
+        -- Проверка на отключение
+        if not undergroundFarm then
+            break
+        end
+    end
+    
+    -- Очистка
+    if undergroundBodyPosition then
+        undergroundBodyPosition:Destroy()
+        undergroundBodyPosition = nil
+    end
+    if undergroundBodyGyro then
+        undergroundBodyGyro:Destroy()
+        undergroundBodyGyro = nil
+    end
+    
+    local char = LocalPlayer.Character
+    if char then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.PlatformStand = false
+            humanoid.Sit = false
+        end
+    end
+    
+    undergroundActive = false
+    Window:Notify({
+        Title = "Underground Farm",
+        Content = "Underground farm stopped",
+        Icon = "x-circle",
+        Duration = 3
+    })
+end
+
+local function StartUndergroundFarm()
+    if undergroundFarm then
+        -- Сначала останавливаем
+        undergroundFarm = false
+        undergroundActive = false
+        if undergroundBodyPosition then
+            undergroundBodyPosition:Destroy()
+            undergroundBodyPosition = nil
+        end
+        if undergroundBodyGyro then
+            undergroundBodyGyro:Destroy()
+            undergroundBodyGyro = nil
+        end
+        local char = LocalPlayer.Character
+        if char then
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.PlatformStand = false
+                humanoid.Sit = false
+            end
+        end
+        Window:Notify({
+            Title = "Underground Farm",
+            Content = "Disabled",
+            Icon = "x-circle",
+            Duration = 2
+        })
+        return
+    end
+    
+    undergroundFarm = true
+    
+    -- Телепортируемся под карту
+    local char = LocalPlayer.Character
+    if not char then
+        Window:Notify({
+            Title = "Error",
+            Content = "Character not found!",
+            Icon = "x-circle",
+            Duration = 3
+        })
+        undergroundFarm = false
+        return
+    end
+    
+    TeleportUnderground()
+    
+    -- Запускаем цикл сбора
+    task.spawn(UndergroundCollectLoop)
+end
+
 -- ===== FARMING FUNCTIONS =====
 local function GetClosestCoin()
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -294,7 +543,7 @@ local function GetClosestCandy()
 end
 
 local function CollectCoin()
-    if not (autoCoin or autoCandy) or not roundActive or flingingMurderer then return end
+    if not (autoCoin or autoCandy) or not roundActive or flingingMurderer or undergroundFarm then return end
     
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
@@ -360,10 +609,9 @@ local function FlingMurderer()
         Duration = 3
     })
     
-    -- Fling logic
     local target = murderer.Character
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local targetRoot = target:FindFirstChild("HumanoidRootPart")
+local targetRoot = target:FindFirstChild("HumanoidRootPart")
     local humanoid = target:FindFirstChildOfClass("Humanoid")
     
     if root and targetRoot and humanoid then
@@ -427,11 +675,9 @@ local function KillNearest()
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
     
-    -- Teleport to target
     root.CFrame = CFrame.new(target.Root.Position + Vector3.new(0, 2, 0), target.Root.Position)
     task.wait(0.1)
     
-    -- Get knife
     local knife = LocalPlayer.Character:FindFirstChild("Knife")
     if not knife then
         local backpack = LocalPlayer:FindFirstChild("Backpack")
@@ -681,7 +927,6 @@ local function ActivateTradeScam()
         Duration = 3
     })
 end
-
 -- ===== GUN GRAB =====
 local gunDropLocations = {
     "ResearchFacility", "Hospital3", "MilBase", "House2", "Workplace",
@@ -714,7 +959,6 @@ local function GrabGun()
         end
     end
     
-    -- Check for standalone gun drop
     local gunDrop = workspace:FindFirstChild("GunDrop")
     if gunDrop then
         local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -772,8 +1016,8 @@ if coinRemote then
             if maxCandy <= candyCount then
                 Window:Notify({
                     Title = "Bag Full!",
-                    Content = "Candy bag is full (" .. candyCount .. "/" .. maxCandy .. ")",
-                    Icon = "package",
+                    Content =  "Candy bag is full (" .. candyCount .. "/" .. maxCandy .. ")",
+Icon = "package",
                     Duration = 3
                 })
                 autoCoin = false
@@ -794,7 +1038,7 @@ end
 -- ===== FARM LOOP =====
 task.spawn(function()
     while true do
-        if (autoCoin or autoCandy) and roundActive and not flingingMurderer then
+        if (autoCoin or autoCandy) and roundActive and not flingingMurderer and not undergroundFarm then
             CollectCoin()
         end
         task.wait(0.1)
@@ -815,7 +1059,6 @@ end)
 RunService.Stepped:Connect(function()
     UpdateESP()
     
-    -- Update tracers
     for player, line in pairs(tracers) do
         if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
             local root = player.Character.HumanoidRootPart
@@ -836,7 +1079,7 @@ end)
 
 -- ===== CHARACTER NOCLIP =====
 RunService.Stepped:Connect(function()
-    if (autoCoin or autoCandy) and roundActive then
+    if (autoCoin or autoCandy) and roundActive and not undergroundFarm then
         local char = LocalPlayer.Character
         if char and char:IsDescendantOf(workspace) then
             for _, part in ipairs(char:GetDescendants()) do
@@ -1011,6 +1254,120 @@ farmTab:Toggle({
 })
 
 farmTab:Space()
+-- ===== UNDERGROUND AUTOFARM SECTION =====
+farmTab:Section({
+    Title = "Underground Autofarm",
+    TextSize = 18,
+    FontWeight = Enum.FontWeight.SemiBold,
+    Icon = "arrow-down"
+})
+
+farmTab:Toggle({
+    Flag = "UndergroundFarm",
+    Title = "Enable Underground Farm",
+    Desc = "Farm coins/candy from below the map (lying down position)",
+    Default = false,
+    Callback = function(value)
+        if value then
+            StartUndergroundFarm()
+        else
+            if undergroundFarm then
+                undergroundFarm = false
+                undergroundActive = false
+                if undergroundBodyPosition then
+                    undergroundBodyPosition:Destroy()
+                    undergroundBodyPosition = nil
+                end
+                if undergroundBodyGyro then
+                    undergroundBodyGyro:Destroy()
+                    undergroundBodyGyro = nil
+                end
+                local char = LocalPlayer.Character
+                if char then
+                    local humanoid = char:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        humanoid.PlatformStand = false
+                        humanoid.Sit = false
+                    end
+                end
+                Window:Notify({
+                    Title = "Underground Farm",
+                    Content = "Disabled",
+                    Icon = "x-circle",
+                    Duration = 2
+                })
+            end
+        end
+    end
+})
+
+farmTab:Space()
+
+farmTab:Dropdown({
+    Flag = "UndergroundMode",
+    Title = "Collect Mode",
+    Desc = "Choose what to collect underground",
+    Values = {
+        {Title = "Coins", Icon = "dollar-sign"},
+        {Title = "Candy", Icon = "candy"}
+    },
+    Value = "Coins",
+    Callback = function(value)
+        undergroundMode = value.Title
+        Window:Notify({
+            Title = "Underground Mode",
+            Content = "Switched to: " .. value.Title,
+            Icon = "check-circle",
+            Duration = 2
+        })
+    end
+})
+
+farmTab:Space()
+
+farmTab:Slider({
+    Flag = "UndergroundSpeed",
+    Title = "Movement Speed",
+    Desc = "Speed of movement underground (1-30)",
+    Step = 1,
+    Value = {
+        Min = 1,
+        Max = 30,
+        Default = 15
+    },
+    Callback = function(value)
+        undergroundSpeed = value
+    end
+})
+
+farmTab:Space()
+
+farmTab:Slider({
+    Flag = "UndergroundLayer",
+    Title = "Underground Depth",
+    Desc = "How far below the map to go (-10 to -100)",
+    Step = 5,
+    Value = {
+        Min = -10,
+        Max = -100,
+        Default = -50
+    },
+    Callback = function(value)
+        undergroundLayer = value
+    end
+})
+
+farmTab:Space()
+
+farmTab:Label({
+    Title = "⚠️ Toggle Underground Farm to start/stop",
+    TextSize = 14,
+    TextTransparency = 0.4
+})
+
+farmTab:Space()
+
+-- ===== END UNDERGROUND SECTION =====
 
 farmTab:Toggle({
     Flag = "AutoEndRound",
@@ -1072,13 +1429,15 @@ farmTab:Button({
     Callback = function()
         collectedCount = 0
         candyCount = 0
+        undergroundCollectCount = 0
         Window:Notify({
             Title = "Counter Reset",
-            Content = "Collection counter reset!",
+            Content = "All counters reset!",
             Icon = "check-circle",
             Duration = 3
         })
-    end})
+    end
+})
 
 farmTab:Space()
 
@@ -1440,6 +1799,7 @@ weaponTab:Button({
         SpawnWeapon("XenoGun")
     end
 })
+
 -- Weapon Dupe Tab
 local dupeTab = mainTab:Tab({
     Title = "Weapon Dupe",
@@ -1756,6 +2116,7 @@ settingsTab:Section({
     TextSize = 18,
     FontWeight = Enum.FontWeight.SemiBold
 })
+
 local configNameInput = settingsTab:Input({
     Flag = "ConfigName",
     Title = "Config Name",
@@ -1839,7 +2200,7 @@ infoTab:Section({
 infoTab:Space()
 
 infoTab:Section({
-    Title = "Player ESP • Auto Farm • Character Mods • Teleportation • Weapon Spawner • Weapon Duplication • Visual Weapons • Trade Scam • Role Functions • Anti-AFK • Server Utilities",
+    Title = "Player ESP • Auto Farm • Underground Farm • Character Mods • Teleportation • Weapon Spawner • Weapon Duplication • Visual Weapons • Trade Scam • Role Functions • Anti-AFK • Server Utilities",
     TextSize = 15,
     TextTransparency = 0.4,
     FontWeight = Enum.FontWeight.Medium
@@ -1876,7 +2237,7 @@ Window.CurrentConfig:Save()
 
 Window:Notify({
     Title = GradientText("Woloko Hub Loaded!", Colors.Woloko, Colors.DarkWoloko),
-    Content = "Welcome to the Premium Edition! Press G to toggle GUI.",
+    Content = "Welcome to the Premium Edition v2.0! Press G to toggle GUI.",
     Icon = "crown",
     Duration = 5
 })
