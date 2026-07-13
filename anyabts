@@ -1,6 +1,6 @@
 -- Woloko Hub - MM2 Script
 -- Credits: Woloko Team
--- Version: 2.0 (Underground Farm Added)
+-- Version: 3.0 (Merged Features - NO UNDERGROUND)
 
 local vu1 = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
@@ -18,6 +18,8 @@ local LocalPlayer = Players.LocalPlayer
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local TextChatService = game:GetService("TextChatService")
 
 local Colors = {
     Woloko = Color3.fromHex("#FF6B00"),
@@ -90,7 +92,7 @@ repeat task.wait() until isReady
 
 local Window = vu1:CreateWindow({
     Title = GradientText("Woloko Hub", Colors.Woloko, Colors.DarkWoloko),
-    Author = "by Woloko Team | Premium Edition v2.0",
+    Author = "by Woloko Team | Premium Edition v3.0",
     Folder = "WolokoHub",
     Icon = "crown",
     NewElements = true,
@@ -122,7 +124,6 @@ local autoCoin = false
 local autoCandy = false
 local autoEndRound = false
 local autoFlingMurderer = false
-local autoReset = false
 local walkSpeedVal = 25
 local farmSpeed = 25
 local collectedCount = 0
@@ -146,15 +147,30 @@ local fromWeapon = ""
 local toWeapon = ""
 local configName = "default"
 
--- ===== UNDERGROUND AUTOFARM VARIABLES =====
-local undergroundFarm = false
-local undergroundMode = "Coins" -- "Coins" or "Candy"
-local undergroundSpeed = 15
-local undergroundBodyPosition = nil
-local undergroundBodyGyro = nil
-local undergroundActive = false
-local undergroundCollectCount = 0
-local undergroundLayer = -50
+-- ===== NEW VARIABLES FROM FILES =====
+local infJumpEnabled = false
+local noclipEnabled = false
+local antiFlingEnabled = false
+local spectateEnabled = false
+local spectateIndex = 1
+local aimbotEnabled = false
+local teamCheck = false
+local wallCheck = false
+local smoothnessEnabled = true
+local fovRadius = 90
+local smoothnessValue = 0.1
+local lockPart = "Head"
+local silentAimEnabled = false
+local autoShootMurder = false
+local hitChance = 100
+local flyEnabled = false
+local flySpeed = 50
+local flyBodyVelocity = nil
+local flyBodyGyro = nil
+local murdererESP = false
+local sheriffESP = false
+local gunESPEnabled = false
+local gunESPThread = nil
 
 -- ===== CORE FUNCTIONS =====
 local function GetRole(player)
@@ -246,243 +262,516 @@ local function UpdateESP()
     end
 end
 
--- ===== UNDERGROUND AUTOFARM CORE =====
-local function GetUndergroundTargets()
-    local targets = {}
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return targets end
+-- ===== NEW: INFINITE JUMP =====
+local function ToggleInfiniteJump(state)
+    infJumpEnabled = state
+end
+
+UserInputService.JumpRequest:Connect(function()
+    if infJumpEnabled and LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+-- ===== NEW: NOCLIP =====
+RunService.Stepped:Connect(function()
+    if noclipEnabled and LocalPlayer.Character then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- ===== NEW: ANTI FLING =====
+RunService.Stepped:Connect(function()
+    if antiFlingEnabled and LocalPlayer.Character then
+        local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+end)
+
+-- ===== NEW: FLY =====
+local function ToggleFly(state)
+    flyEnabled = state
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
     
-    for _, child in ipairs(Workspace:GetChildren()) do
-        if child:FindFirstChild("CoinContainer") then
-            for _, coin in ipairs(child.CoinContainer:GetChildren()) do
-                if coin:IsA("BasePart") and coin:FindFirstChild("TouchInterest") then
-                    if undergroundMode == "Coins" then
-                        table.insert(targets, coin)
-                    elseif undergroundMode == "Candy" and coin:GetAttribute("CoinID") == "Candy" then
-                        table.insert(targets, coin)
-                    end
+    if flyEnabled then
+        flyBodyVelocity = Instance.new("BodyVelocity")
+        flyBodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+        flyBodyVelocity.Velocity = Vector3.zero
+        flyBodyVelocity.Parent = hrp
+        
+        flyBodyGyro = Instance.new("BodyGyro")
+        flyBodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+        flyBodyGyro.CFrame = hrp.CFrame
+        flyBodyGyro.Parent = hrp
+        
+        RunService.RenderStepped:Connect(function()
+            if not flyEnabled then return end
+            local direction = Vector3.zero
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                direction = direction + (Camera.CFrame.LookVector)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                direction = direction - (Camera.CFrame.LookVector)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                direction = direction - (Camera.CFrame.RightVector)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                direction = direction + (Camera.CFrame.RightVector)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.E) then
+                direction = direction + Vector3.new(0, 1, 0)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Q) then
+                direction = direction - Vector3.new(0, 1, 0)
+            end
+            
+            if flyBodyVelocity then
+                flyBodyVelocity.Velocity = direction * flySpeed
+            end
+            if flyBodyGyro and direction.Magnitude > 0 then
+                flyBodyGyro.CFrame = CFrame.new(hrp.Position, hrp.Position + direction)
+            end
+        end)
+    else
+        if flyBodyVelocity then flyBodyVelocity:Destroy() end
+        if flyBodyGyro then flyBodyGyro:Destroy() end
+    end
+end
+
+-- ===== NEW: SPECTATE =====
+local function GetAlivePlayers()
+    local alive = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local humanoid = p.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                table.insert(alive, p)
+            end
+        end
+    end
+    return alive
+end
+
+RunService.RenderStepped:Connect(function()
+    if not spectateEnabled then
+        if LocalPlayer.Character then
+            local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                Camera.CameraSubject = humanoid
+            end
+        end
+        return
+    end
+    
+    local alive = GetAlivePlayers()
+    if #alive == 0 then return end
+    if spectateIndex > #alive then spectateIndex = 1 end
+    if spectateIndex < 1 then spectateIndex = #alive end
+    
+    local target = alive[spectateIndex]
+    if target and target.Character then
+        local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            Camera.CameraSubject = humanoid
+        end
+    end
+end)
+
+-- ===== NEW: AIMBOT =====
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Radius = fovRadius
+FOVCircle.Thickness = 2
+FOVCircle.Color = Color3.fromRGB(255, 0, 0)
+FOVCircle.Filled = false
+FOVCircle.Visible = false
+
+RunService.RenderStepped:Connect(function()
+    local screenCenter = Camera.ViewportSize / 2
+    FOVCircle.Position = Vector2.new(screenCenter.X, screenCenter.Y)
+    FOVCircle.Visible = aimbotEnabled
+end)
+
+local function IsValidTarget(player)
+    if teamCheck and player.Team == LocalPlayer.Team then
+        return false
+    end
+    
+    if wallCheck then
+        local character = player.Character
+        local head = character and character:FindFirstChild(lockPart)
+        if head then
+            local origin = Camera.CFrame.Position
+            local direction = (head.Position - origin).Unit * (head.Position - origin).Magnitude
+            local ray = Ray.new(origin, direction)
+            local hitPart = Workspace:FindPartOnRay(ray, LocalPlayer.Character, true)
+            return hitPart == head
+        end
+        return false
+    end
+    return true
+end
+
+local function GetClosestPlayer()
+    local closestPlayer = nil
+    local shortestDistance = fovRadius
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(lockPart) and IsValidTarget(player) then
+            local head = player.Character:FindFirstChild(lockPart)
+            local headScreenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+            
+            if onScreen then
+                local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                local distance = (Vector2.new(headScreenPos.X, headScreenPos.Y) - screenCenter).Magnitude
+                
+                if distance < shortestDistance then
+                    shortestDistance = distance
+                    closestPlayer = player
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+RunService.RenderStepped:Connect(function()
+    if not aimbotEnabled then return end
+    
+    local target = GetClosestPlayer()
+    if target and target.Character and target.Character:FindFirstChild(lockPart) then
+        local head = target.Character:FindFirstChild(lockPart)
+        local currentCameraCFrame = Camera.CFrame
+        local targetCameraCFrame = CFrame.new(currentCameraCFrame.Position, head.Position)
+        
+        if smoothnessEnabled then
+            Camera.CFrame = currentCameraCFrame:Lerp(targetCameraCFrame, smoothnessValue)
+        else
+            Camera.CFrame = targetCameraCFrame
+        end
+    end
+end)
+
+-- ===== NEW: SILENT AIM =====
+local lockedPlayer = nil
+local highlight = Instance.new("Highlight")
+highlight.FillColor = Color3.fromRGB(255, 0, 0)
+highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+highlight.OutlineTransparency = 0.5
+highlight.FillTransparency = 0.3
+
+local function ClosestPlayerToMouse()
+    local mouse = LocalPlayer:GetMouse()
+    local closest, closestDistance = nil, math.huge
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local targetPart = player.Character.HumanoidRootPart
+            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+            local mousePos = Vector2.new(mouse.X, mouse.Y)
+            local distance = (mousePos - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+            
+            if onScreen and distance < closestDistance then
+                closest = player
+                closestDistance = distance
+            end
+        end
+    end
+    return closest
+end
+
+RunService.RenderStepped:Connect(function()
+    if silentAimEnabled then
+        lockedPlayer = ClosestPlayerToMouse()
+        if lockedPlayer and lockedPlayer.Character then
+            highlight.Parent = lockedPlayer.Character
+        end
+    else
+        highlight.Parent = nil
+        lockedPlayer = nil
+    end
+end)
+
+local function ShouldHit()
+    return math.random(1, 100) <= hitChance
+end
+
+LPH_NO_VIRTUALIZE(function()
+    local originalMethod
+    originalMethod = hookmetamethod(game, "__index", function(self, key)
+        if not checkcaller() and self:IsA("Mouse") and key == "Hit" then
+            if silentAimEnabled and lockedPlayer and lockedPlayer.Character and lockedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                if ShouldHit() then
+                    return lockedPlayer.Character.HumanoidRootPart.CFrame
+                end
+            end
+        end
+        return originalMethod(self, key)
+    end)
+end)
+
+-- ===== NEW: AUTO SHOOT MURDERER =====
+RunService.RenderStepped:Connect(function()
+    if not autoShootMurder then return end
+    if not LocalPlayer.Character then return end
+    
+    local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    if not tool or tool.Name ~= "Gun" then return end
+    
+    local murderer = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if player.Character:FindFirstChild("Knife") then
+                murderer = player
+                break
+            end
+            local backpack = player:FindFirstChild("Backpack")
+            if backpack and backpack:FindFirstChild("Knife") then
+                murderer = player
+                break
+            end
+        end
+    end
+    
+    if murderer and murderer.Character then
+        local torso = murderer.Character:FindFirstChild("UpperTorso") or murderer.Character:FindFirstChild("Torso")
+        if torso then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, torso.Position)
+        end
+    end
+end)
+
+-- ===== NEW: MURDERER/SHERIFF ESP =====
+local function ClearRoleESP()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character and p.Character:FindFirstChild("Head") then
+            local tag = p.Character.Head:FindFirstChild("RoleTag")
+            if tag then tag:Destroy() end
+        end
+    end
+end
+
+local function TagPlayer(player, text, color)
+    if not player.Character or not player.Character:FindFirstChild("Head") then return end
+    local head = player.Character.Head
+    if head:FindFirstChild("RoleTag") then
+        head.RoleTag:Destroy()
+    end
+    
+    local bg = Instance.new("BillboardGui")
+    bg.Name = "RoleTag"
+    bg.Parent = head
+    bg.Size = UDim2.new(0, 120, 0, 28)
+    bg.StudsOffset = Vector3.new(0, 2, 0)
+    bg.AlwaysOnTop = true
+    
+    local label = Instance.new("TextLabel")
+    label.Parent = bg
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = color
+    label.TextStrokeTransparency = 0
+    label.Font = Enum.Font.GothamBold
+    label.TextScaled = true
+end
+
+local function IsMurderer(player)
+    local backpack = player:FindFirstChild("Backpack")
+    local character = player.Character
+    return (character and character:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife"))
+end
+
+local function IsSheriff(player)
+    local backpack = player:FindFirstChild("Backpack")
+    local character = player.Character
+    return (character and character:FindFirstChild("Gun")) or (backpack and backpack:FindFirstChild("Gun"))
+end
+
+RunService.RenderStepped:Connect(function()
+    ClearRoleESP()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            if murdererESP and IsMurderer(p) then
+                TagPlayer(p, "MURDERER", Color3.fromRGB(255, 60, 60))
+            end
+            if sheriffESP and IsSheriff(p) then
+                TagPlayer(p, "SHERIFF", Color3.fromRGB(80, 170, 255))
+            end
+        end
+    end
+end)
+
+-- ===== NEW: GUN ESP =====
+local function ToggleGunESP(enabled)
+    gunESPEnabled = enabled
+    local normal = Workspace:FindFirstChild("Normal")
+    if normal then
+        for _, gunDrop in ipairs(normal:GetChildren()) do
+            if gunDrop.Name == "GunDrop" then
+                local highlight = gunDrop:FindFirstChild("Highlight")
+                if enabled and not highlight then
+                    local h = Instance.new("Highlight", gunDrop)
+                    h.FillColor = Color3.fromRGB(7, 0, 255)
+                    h.OutlineTransparency = 0.75
+                elseif not enabled and highlight then
+                    highlight:Destroy()
+                end
+            end
+        end
+    end
+end
+
+local function CheckForNewGunDrops()
+    while gunESPEnabled do
+        local normal = Workspace:FindFirstChild("Normal")
+        if normal then
+            for _, gunDrop in ipairs(normal:GetChildren()) do
+                if gunDrop.Name == "GunDrop" and not gunDrop:FindFirstChild("Highlight") then
+                    local h = Instance.new("Highlight", gunDrop)
+                    h.FillColor = Color3.fromRGB(7, 0, 255)
+                    h.OutlineTransparency = 0.75
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end
+
+-- ===== NEW: REJOIN =====
+local function Rejoin()
+    local TeleportService = game:GetService("TeleportService")
+    TeleportService:Teleport(game.PlaceId, LocalPlayer)
+end
+-- ===== NEW: SERVER HOP =====
+local function ServerHop()
+    local TeleportService = game:GetService("TeleportService")
+    local HttpService = game:GetService("HttpService")
+    local placeId = game.PlaceId
+    
+    local req = syn and syn.request or http_request or request
+    if not req then
+        Window:Notify({
+            Title = "Error",
+            Content = "HTTP request not available",
+            Icon = "x-circle",
+            Duration = 3
+        })
+        return
+    end
+    
+    local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=As&limit=100"
+    local response = req({
+        Url = url,
+        Method = "GET"
+    })
+    
+    if response and response.Body then
+        local data = HttpService:JSONDecode(response.Body)
+        local servers = {}
+        for _, v in ipairs(data.data) do
+            if v.playing < v.maxPlayers then
+                table.insert(servers, v.id)
+            end
+        end
+        if #servers > 0 then
+            local randomServer = servers[math.random(1, #servers)]
+            TeleportService:TeleportToPlaceInstance(placeId, randomServer, LocalPlayer)
+        end
+    end
+end)
+
+-- ===== NEW: DETECT ROLES =====
+local function DetectRoles()
+    local murderer, sheriff = nil, nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if player.Character:FindFirstChild("Knife") then
+                murderer = player
+            end
+            if player.Character:FindFirstChild("Gun") then
+                sheriff = player
+            end
+            local backpack = player:FindFirstChild("Backpack")
+            if backpack then
+                if backpack:FindFirstChild("Knife") then
+                    murderer = player
+                end
+                if backpack:FindFirstChild("Gun") then
+                    sheriff = player
                 end
             end
         end
     end
     
-    if undergroundMode == "Candy" then
-        for _, descendant in ipairs(Workspace:GetDescendants()) do
-            if descendant:IsA("BasePart") and descendant.Name == "candy" and descendant:FindFirstChild("TouchInterest") then
-                table.insert(targets, descendant)
-            end
-        end
-    end
-    
-    return targets
-end
-
-local function GetClosestUndergroundTarget()
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return nil, math.huge end
-    
-    local targets = GetUndergroundTargets()
-    local closest = nil
-    local closestDist = math.huge
-    
-    for _, target in ipairs(targets) do
-        if target and target:IsA("BasePart") then
-            local dist = (root.Position - target.Position).Magnitude
-            if dist < closestDist then
-                closest = target
-                closestDist = dist
-            end
-        end
-    end
-    
-    return closest, closestDist
-end
-
-local function TeleportUnderground()
-    if not undergroundFarm then return end
-    
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local root = char:FindFirstChild("HumanoidRootPart")
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if not root or not humanoid then return end
-    
-    -- Проваливаемся под карту
-    local underPos = root.Position + Vector3.new(0, undergroundLayer, 0)
-    root.CFrame = CFrame.new(underPos)
-    
-    -- Ложимся на спину (поза "—")
-    root.CFrame = root.CFrame * CFrame.Angles(math.rad(90), 0, 0)
-    
-    -- Создаём BodyPosition для удержания под картой
-    if undergroundBodyPosition then
-        undergroundBodyPosition:Destroy()
-    end
-    if undergroundBodyGyro then
-        undergroundBodyGyro:Destroy()
-    end
-    
-    undergroundBodyPosition = Instance.new("BodyPosition")
-    undergroundBodyPosition.MaxForce = Vector3.new(100000, 100000, 100000)
-    undergroundBodyPosition.P = 2000
-    undergroundBodyPosition.D = 500
-    undergroundBodyPosition.Position = root.Position + Vector3.new(0, -5, 0)
-    undergroundBodyPosition.Parent = root
-    
-    undergroundBodyGyro = Instance.new("BodyGyro")
-    undergroundBodyGyro.MaxTorque = Vector3.new(100000, 100000, 100000)
-    undergroundBodyGyro.P = 2000
-    undergroundBodyGyro.D = 500
-    undergroundBodyGyro.CFrame = CFrame.new(root.Position) * CFrame.Angles(math.rad(90), 0, 0)
-    undergroundBodyGyro.Parent = root
-    
-    humanoid.PlatformStand = true
-    humanoid.Sit = true
-    
-    undergroundActive = true
-    
-    Window:Notify({
-        Title = "Underground Farm",
-        Content = "Teleported underground! Collecting " .. undergroundMode,
-        Icon = "arrow-down",
-        Duration = 3
-    })
-end
-
-local function UndergroundCollectLoop()
-    while undergroundFarm and undergroundActive do
-        local char = LocalPlayer.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-        
-        if not char or not root or not humanoid then
-            undergroundActive = false
-            break
-        end
-        
-        -- Удерживаем позу лёжа
-        root.CFrame = CFrame.new(root.Position) * CFrame.Angles(math.rad(90), 0, 0)
-        humanoid.Sit = true
-        humanoid.PlatformStand = true
-        
-        -- Ищем ближайшую цель
-        local target, dist = GetClosestUndergroundTarget()
-        
-        if target then
-            -- Двигаемся к цели (под картой)
-            local targetPos = target.Position + Vector3.new(0, -2, 0)
-            local diff = targetPos - root.Position
-            local distance = diff.Magnitude
-            
-            if distance > 3 then
-                -- Плавное перемещение
-                local direction = diff.Unit
-                local newPos = root.Position + direction * math.min(undergroundSpeed, distance)
-                root.CFrame = CFrame.new(newPos) * CFrame.Angles(math.rad(90), 0, 0)
-            end
-            
-            -- Обновляем BodyPosition
-            if undergroundBodyPosition then
-                undergroundBodyPosition.Position = root.Position + Vector3.new(0, -5, 0)
-            end
-            
-            -- Проверяем, собрали ли мы цель
-            if distance < 5 then
-                -- Цель должна собраться автоматически через TouchInterest
-                undergroundCollectCount = undergroundCollectCount + 1
-            end
-            
-            task.wait(0.05)
-        else
-            -- Если целей нет, просто лежим под картой
-            task.wait(0.5)
-        end
-        
-        -- Проверка на отключение
-        if not undergroundFarm then
-            break
-        end
-    end
-    
-    -- Очистка
-    if undergroundBodyPosition then
-        undergroundBodyPosition:Destroy()
-        undergroundBodyPosition = nil
-    end
-    if undergroundBodyGyro then
-        undergroundBodyGyro:Destroy()
-        undergroundBodyGyro = nil
-    end
-    
-    local char = LocalPlayer.Character
-    if char then
-        local humanoid = char:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid.PlatformStand = false
-            humanoid.Sit = false
-        end
-    end
-    
-    undergroundActive = false
-    Window:Notify({
-        Title = "Underground Farm",
-        Content = "Underground farm stopped",
-        Icon = "x-circle",
-        Duration = 3
-    })
-end
-
-local function StartUndergroundFarm()
-    if undergroundFarm then
-        -- Сначала останавливаем
-        undergroundFarm = false
-        undergroundActive = false
-        if undergroundBodyPosition then
-            undergroundBodyPosition:Destroy()
-            undergroundBodyPosition = nil
-        end
-        if undergroundBodyGyro then
-            undergroundBodyGyro:Destroy()
-            undergroundBodyGyro = nil
-        end
-        local char = LocalPlayer.Character
-        if char then
-            local humanoid = char:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.PlatformStand = false
-                humanoid.Sit = false
-            end
-        end
+    if murderer then
+        local msg = murderer.Name .. " is the Murderer!"
+        pcall(function()
+            TextChatService.TextChannels.RBXGeneral:SendAsync(msg)
+        end)
         Window:Notify({
-            Title = "Underground Farm",
-            Content = "Disabled",
-            Icon = "x-circle",
-            Duration = 2
+            Title = "Murderer Found!",
+            Content = msg,
+            Icon = "knife",
+            Duration = 5
         })
-        return
     end
     
-    undergroundFarm = true
-    
-    -- Телепортируемся под карту
-    local char = LocalPlayer.Character
-    if not char then
+    if sheriff then
+        local msg = sheriff.Name .. " is the Sheriff!"
+        pcall(function()
+            TextChatService.TextChannels.RBXGeneral:SendAsync(msg)
+        end)
+        Window:Notify({
+            Title = "Sheriff Found!",
+            Content = msg,
+            Icon = "shield",
+            Duration = 5
+        })
+    end
+end)
+
+-- ===== NEW: KILL ALL =====
+local function KillAllPlayers()
+    local knife = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Knife")
+    if not knife then
         Window:Notify({
             Title = "Error",
-            Content = "Character not found!",
+            Content = "You need to be Murderer!",
             Icon = "x-circle",
             Duration = 3
         })
-        undergroundFarm = false
         return
     end
     
-    TeleportUnderground()
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
     
-    -- Запускаем цикл сбора
-    task.spawn(UndergroundCollectLoop)
-end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local humanoid = p.Character:FindFirstChildOfClass("Humanoid")
+            local targetRoot = p.Character:FindFirstChild("HumanoidRootPart")
+            if humanoid and humanoid.Health > 0 and targetRoot then
+                root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
+                knife:Activate()
+                task.wait(0.15)
+            end
+        end
+    end
+end)
 
 -- ===== FARMING FUNCTIONS =====
 local function GetClosestCoin()
@@ -543,7 +832,7 @@ local function GetClosestCandy()
 end
 
 local function CollectCoin()
-    if not (autoCoin or autoCandy) or not roundActive or flingingMurderer or undergroundFarm then return end
+    if not (autoCoin or autoCandy) or not roundActive or flingingMurderer then return end
     
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
@@ -611,7 +900,7 @@ local function FlingMurderer()
     
     local target = murderer.Character
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-local targetRoot = target:FindFirstChild("HumanoidRootPart")
+    local targetRoot = target:FindFirstChild("HumanoidRootPart")
     local humanoid = target:FindFirstChildOfClass("Humanoid")
     
     if root and targetRoot and humanoid then
@@ -640,59 +929,6 @@ local targetRoot = target:FindFirstChild("HumanoidRootPart")
     })
     
     flingingMurderer = false
-end
-
--- ===== KILL FUNCTIONS =====
-local function GetNearestTarget()
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return nil end
-    
-    local targets = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-            local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
-            if humanoid and humanoid.Health > 0 and targetRoot then
-                table.insert(targets, {
-                    Player = player,
-                    Distance = (root.Position - targetRoot.Position).Magnitude,
-                    Root = targetRoot
-                })
-            end
-        end
-    end
-    
-    table.sort(targets, function(a, b) return a.Distance < b.Distance end)
-    return targets[1]
-end
-
-local function KillNearest()
-    if not killAllActive then return end
-    
-    local target = GetNearestTarget()
-    if not target then return end
-    
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-    
-    root.CFrame = CFrame.new(target.Root.Position + Vector3.new(0, 2, 0), target.Root.Position)
-    task.wait(0.1)
-    
-    local knife = LocalPlayer.Character:FindFirstChild("Knife")
-    if not knife then
-        local backpack = LocalPlayer:FindFirstChild("Backpack")
-        if backpack then
-            knife = backpack:FindFirstChild("Knife")
-            if knife then knife.Parent = LocalPlayer.Character end
-        end
-    end
-    
-    if knife and knife:FindFirstChild("Stab") then
-        for i = 1, 3 do
-            knife.Stab:FireServer("Down")
-            task.wait(0.1)
-        end
-    end
 end
 
 -- ===== WEAPON SPAWN =====
@@ -745,7 +981,7 @@ local function SpawnWeapon(weaponName)
             end
         end
     end
-    
+
     if found then
         Window:Notify({
             Title = "Weapon Spawned",
@@ -927,6 +1163,7 @@ local function ActivateTradeScam()
         Duration = 3
     })
 end
+
 -- ===== GUN GRAB =====
 local gunDropLocations = {
     "ResearchFacility", "Hospital3", "MilBase", "House2", "Workplace",
@@ -987,7 +1224,6 @@ local function GrabGun()
     })
     return false
 end
-
 -- ===== EVENTS =====
 local coinRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes.Gameplay:FindFirstChild("CoinCollected")
 local roundStartRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes.Gameplay:FindFirstChild("RoundStart")
@@ -1016,8 +1252,8 @@ if coinRemote then
             if maxCandy <= candyCount then
                 Window:Notify({
                     Title = "Bag Full!",
-                    Content =  "Candy bag is full (" .. candyCount .. "/" .. maxCandy .. ")",
-Icon = "package",
+                    Content = "Candy bag is full (" .. candyCount .. "/" .. maxCandy .. ")",
+                    Icon = "package",
                     Duration = 3
                 })
                 autoCoin = false
@@ -1038,20 +1274,10 @@ end
 -- ===== FARM LOOP =====
 task.spawn(function()
     while true do
-        if (autoCoin or autoCandy) and roundActive and not flingingMurderer and not undergroundFarm then
+        if (autoCoin or autoCandy) and roundActive and not flingingMurderer then
             CollectCoin()
         end
         task.wait(0.1)
-    end
-end)
-
--- ===== KILL LOOP =====
-task.spawn(function()
-    while true do
-        if killAllActive then
-            KillNearest()
-        end
-        task.wait(0.5)
     end
 end)
 
@@ -1073,20 +1299,6 @@ RunService.Stepped:Connect(function()
             end
         else
             line.Visible = false
-        end
-    end
-end)
-
--- ===== CHARACTER NOCLIP =====
-RunService.Stepped:Connect(function()
-    if (autoCoin or autoCandy) and roundActive and not undergroundFarm then
-        local char = LocalPlayer.Character
-        if char and char:IsDescendantOf(workspace) then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
-                end
-            end
         end
     end
 end)
@@ -1187,6 +1399,56 @@ espTab:Toggle({
     end
 })
 
+espTab:Space()
+
+espTab:Section({
+    Title = "Role ESP",
+    TextSize = 16,
+    FontWeight = Enum.FontWeight.SemiBold
+})
+
+espTab:Toggle({
+    Flag = "MurdererESP",
+    Title = "Murderer ESP",
+    Desc = "Show MURDERER tag above murderer",
+    Default = false,
+    Callback = function(value)
+        murdererESP = value
+    end
+})
+
+espTab:Space()
+
+espTab:Toggle({
+    Flag = "SheriffESP",
+    Title = "Sheriff ESP",
+    Desc = "Show SHERIFF tag above sheriff",
+    Default = false,
+    Callback = function(value)
+        sheriffESP = value
+    end
+})
+
+espTab:Space()
+
+espTab:Toggle({
+    Flag = "GunESP",
+    Title = "Gun Drop ESP",
+    Desc = "Highlight gun drops on map",
+    Default = false,
+    Callback = function(value)
+        ToggleGunESP(value)
+        if value then
+            gunESPThread = task.spawn(CheckForNewGunDrops)
+        else
+            if gunESPThread then
+                task.cancel(gunESPThread)
+                gunESPThread = nil
+            end
+        end
+    end
+})
+
 -- Auto Farm Tab
 local farmTab = mainTab:Tab({
     Title = GradientText("Auto Farm", Colors.Woloko, Colors.DarkWoloko),
@@ -1254,120 +1516,6 @@ farmTab:Toggle({
 })
 
 farmTab:Space()
--- ===== UNDERGROUND AUTOFARM SECTION =====
-farmTab:Section({
-    Title = "Underground Autofarm",
-    TextSize = 18,
-    FontWeight = Enum.FontWeight.SemiBold,
-    Icon = "arrow-down"
-})
-
-farmTab:Toggle({
-    Flag = "UndergroundFarm",
-    Title = "Enable Underground Farm",
-    Desc = "Farm coins/candy from below the map (lying down position)",
-    Default = false,
-    Callback = function(value)
-        if value then
-            StartUndergroundFarm()
-        else
-            if undergroundFarm then
-                undergroundFarm = false
-                undergroundActive = false
-                if undergroundBodyPosition then
-                    undergroundBodyPosition:Destroy()
-                    undergroundBodyPosition = nil
-                end
-                if undergroundBodyGyro then
-                    undergroundBodyGyro:Destroy()
-                    undergroundBodyGyro = nil
-                end
-                local char = LocalPlayer.Character
-                if char then
-                    local humanoid = char:FindFirstChildOfClass("Humanoid")
-                    if humanoid then
-                        humanoid.PlatformStand = false
-                        humanoid.Sit = false
-                    end
-                end
-                Window:Notify({
-                    Title = "Underground Farm",
-                    Content = "Disabled",
-                    Icon = "x-circle",
-                    Duration = 2
-                })
-            end
-        end
-    end
-})
-
-farmTab:Space()
-
-farmTab:Dropdown({
-    Flag = "UndergroundMode",
-    Title = "Collect Mode",
-    Desc = "Choose what to collect underground",
-    Values = {
-        {Title = "Coins", Icon = "dollar-sign"},
-        {Title = "Candy", Icon = "candy"}
-    },
-    Value = "Coins",
-    Callback = function(value)
-        undergroundMode = value.Title
-        Window:Notify({
-            Title = "Underground Mode",
-            Content = "Switched to: " .. value.Title,
-            Icon = "check-circle",
-            Duration = 2
-        })
-    end
-})
-
-farmTab:Space()
-
-farmTab:Slider({
-    Flag = "UndergroundSpeed",
-    Title = "Movement Speed",
-    Desc = "Speed of movement underground (1-30)",
-    Step = 1,
-    Value = {
-        Min = 1,
-        Max = 30,
-        Default = 15
-    },
-    Callback = function(value)
-        undergroundSpeed = value
-    end
-})
-
-farmTab:Space()
-
-farmTab:Slider({
-    Flag = "UndergroundLayer",
-    Title = "Underground Depth",
-    Desc = "How far below the map to go (-10 to -100)",
-    Step = 5,
-    Value = {
-        Min = -10,
-        Max = -100,
-        Default = -50
-    },
-    Callback = function(value)
-        undergroundLayer = value
-    end
-})
-
-farmTab:Space()
-
-farmTab:Label({
-    Title = "⚠️ Toggle Underground Farm to start/stop",
-    TextSize = 14,
-    TextTransparency = 0.4
-})
-
-farmTab:Space()
-
--- ===== END UNDERGROUND SECTION =====
 
 farmTab:Toggle({
     Flag = "AutoEndRound",
@@ -1429,7 +1577,6 @@ farmTab:Button({
     Callback = function()
         collectedCount = 0
         candyCount = 0
-        undergroundCollectCount = 0
         Window:Notify({
             Title = "Counter Reset",
             Content = "All counters reset!",
@@ -1515,6 +1662,71 @@ charTab:Slider({
 
 charTab:Space()
 
+charTab:Toggle({
+    Flag = "InfiniteJump",
+    Title = "Infinite Jump",
+    Desc = "Jump infinitely",
+    Default = false,
+    Callback = function(value)
+        ToggleInfiniteJump(value)
+    end
+})
+
+charTab:Space()
+
+charTab:Toggle({
+    Flag = "Noclip",
+    Title = "Noclip",
+    Desc = "Walk through walls",
+    Default = false,
+    Callback = function(value)
+        noclipEnabled = value
+    end
+})
+
+charTab:Space()
+
+charTab:Toggle({
+    Flag = "AntiFling",
+    Title = "Anti Fling",
+    Desc = "Prevent being flung",
+    Default = false,
+    Callback = function(value)
+        antiFlingEnabled = value
+    end
+})
+
+charTab:Space()
+
+charTab:Toggle({
+    Flag = "Fly",
+    Title = "Fly",
+    Desc = "Enable flight mode (WASD + E/Q)",
+    Default = false,
+    Callback = function(value)
+        ToggleFly(value)
+    end
+})
+
+charTab:Space()
+
+charTab:Slider({
+    Flag = "FlySpeed",
+    Title = "Fly Speed",
+    Desc = "Adjust fly speed (10-200)",
+    Step = 5,
+    Value = {
+        Min = 10,
+        Max = 200,
+        Default = 50
+    },
+    Callback = function(value)
+        flySpeed = value
+    end
+})
+
+charTab:Space()
+
 charTab:Button({
     Title = "Reset Movement Settings",
     Icon = "refresh-cw",
@@ -1526,6 +1738,7 @@ charTab:Button({
             local humanoid = char:FindFirstChildOfClass("Humanoid")
             if humanoid then
                 humanoid.WalkSpeed = 16
+                humanoid.JumpPower = 50
             end
         end
         Window:Notify({
@@ -1534,6 +1747,189 @@ charTab:Button({
             Icon = "check-circle",
             Duration = 3
         })
+    end
+})
+
+-- Combat Tab
+local combatTab = mainTab:Tab({
+    Title = "Combat",
+    Icon = "crosshair"
+})
+
+combatTab:Section({
+    Title = "Aimbot Settings",
+    TextSize = 18,
+    FontWeight = Enum.FontWeight.SemiBold
+})
+
+combatTab:Toggle({
+    Flag = "Aimbot",
+    Title = "Aimbot",
+    Desc = "Enable aimbot",
+    Default = false,
+    Callback = function(value)
+        aimbotEnabled = value
+    end
+})
+
+combatTab:Space()
+
+combatTab:Toggle({
+    Flag = "TeamCheck",
+    Title = "Team Check",
+    Desc = "Ignore teammates",
+    Default = false,
+    Callback = function(value)
+        teamCheck = value
+    end
+})
+
+combatTab:Space()
+
+combatTab:Toggle({
+    Flag = "WallCheck",
+    Title = "Wall Check",
+    Desc = "Only aim if wall is visible",
+    Default = false,
+    Callback = function(value)
+        wallCheck = value
+    end
+})
+
+combatTab:Space()
+
+combatTab:Toggle({
+    Flag = "Smoothness",
+    Title = "Smoothness",
+    Desc = "Enable smooth aiming",
+    Default = true,
+    Callback = function(value)
+        smoothnessEnabled = value
+    end
+})
+
+combatTab:Space()
+
+combatTab:Toggle({
+    Flag = "DrawFOV",
+    Title = "Draw FOV Circle",
+    Desc = "Show FOV circle on screen",
+    Default = false,
+    Callback = function(value)
+        FOVCircle.Visible = value and aimbotEnabled
+    end
+})
+
+combatTab:Space()
+
+combatTab:Input({
+    Flag = "FOVRadius",
+    Title = "FOV Radius",
+    Desc = "Aimbot field of view",
+    Default = tostring(fovRadius),
+    Placeholder = "90",
+    Numeric = true,
+    Callback = function(value)
+        fovRadius = tonumber(value) or 90
+        FOVCircle.Radius = fovRadius
+    end
+})
+
+combatTab:Space()
+
+combatTab:Input({
+    Flag = "SmoothnessValue",
+    Title = "Smoothness Value",
+    Desc = "Smoothness amount (0.01-0.5)",
+    Default = tostring(smoothnessValue),
+    Placeholder = "0.1",
+    Numeric = true,
+    Callback = function(value)
+        smoothnessValue = tonumber(value) or 0.1
+    end
+})
+
+combatTab:Space()
+
+combatTab:Dropdown({
+    Flag = "LockPart",
+    Title = "Target Part",
+    Desc = "Body part to aim at",
+    Values = {"Head", "Torso"},
+    Default = 1,
+    Callback = function(value)
+        lockPart = value
+    end
+})
+
+combatTab:Space()
+
+combatTab:Section({
+    Title = "Silent Aim",
+    TextSize = 16,
+    FontWeight = Enum.FontWeight.SemiBold
+})
+
+combatTab:Toggle({
+    Flag = "SilentAim",
+    Title = "Silent Aim",
+    Desc = "Aim without moving camera",
+    Default = false,
+    Callback = function(value)
+        silentAimEnabled = value
+    end
+})
+
+combatTab:Space()
+
+combatTab:Slider({
+    Flag = "HitChance",
+    Title = "Hit Chance",
+    Desc = "Chance to hit (0-100)",
+    Step = 1,
+    Value = {
+        Min = 0,
+        Max = 100,
+        Default = 100
+    },
+    Callback = function(value)
+        hitChance = value
+    end
+})
+
+combatTab:Space()
+
+combatTab:Section({
+    Title = "Murderer Functions",
+    TextSize = 16,
+    FontWeight = Enum.FontWeight.SemiBold
+})
+
+combatTab:Button({
+    Title = "Kill All Players",
+    Icon = "skull",
+    Color = Colors.Blood,
+    Justify = "Center",
+    Callback = function()
+        KillAllPlayers()
+    end
+})
+
+combatTab:Space()
+
+combatTab:Section({
+    Title = "Sheriff Functions",
+    TextSize = 16,
+    FontWeight = Enum.FontWeight.SemiBold
+})
+
+combatTab:Toggle({
+    Flag = "AutoShootMurder",
+    Title = "Auto Shoot Murderer",
+    Desc = "Auto aim at murderer when holding gun",
+    Default = false,
+    Callback = function(value)
+        autoShootMurder = value
     end
 })
 
@@ -1722,6 +2118,58 @@ teleTab:Button({
             Icon = "x-circle",
             Duration = 3
         })
+    end
+})
+
+teleTab:Space()
+
+teleTab:Section({
+    Title = "Spectate",
+    TextSize = 16,
+    FontWeight = Enum.FontWeight.SemiBold
+})
+
+teleTab:Toggle({
+    Flag = "Spectate",
+    Title = "Spectate Players",
+    Desc = "Watch other players",
+    Default = false,
+    Callback = function(value)
+        spectateEnabled = value
+        if not value then
+            if LocalPlayer.Character then
+                local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                if humanoid then
+                    Camera.CameraSubject = humanoid
+                end
+            end
+        end
+    end
+})
+
+teleTab:Space()
+
+teleTab:Button({
+    Title = "Next Player",
+    Icon = "arrow-right",
+    Justify = "Center",
+    Callback = function()
+        if spectateEnabled then
+            spectateIndex = spectateIndex + 1
+        end
+    end
+})
+
+teleTab:Space()
+
+teleTab:Button({
+    Title = "Previous Player",
+    Icon = "arrow-left",
+    Justify = "Center",
+    Callback = function()
+        if spectateEnabled then
+            spectateIndex = spectateIndex - 1
+        end
     end
 })
 
@@ -1974,110 +2422,48 @@ utilTab:Button({
 utilTab:Space()
 
 utilTab:Button({
-    Title = "Server Lagger",
-    Icon = "zap",
-    Color = Colors.Blood,
+    Title = "Detect Roles",
+    Icon = "search",
+    Color = Colors.Purple,
     Justify = "Center",
     Callback = function()
-        Window:Notify({
-            Title = "Server Lagger",
-            Content = "Lagging server... Risk of disconnect!",
-            Icon = "alert-triangle",
-            Duration = 5
-        })
-        pcall(function()
-            local syncData = game:GetService("ReplicatedStorage").GetSyncData
-            local invoke = syncData.InvokeServer
-            while true do
-                for i = 1, 3 do
-                    task.spawn(invoke, syncData)
-                end
-                task.wait()
-            end
-        end)
+        DetectRoles()
     end
 })
 
--- Innocent Tab (Gun System)
-local innocentTab = mainTab:Tab({
-    Title = GradientText("Innocent", Colors.Innocent, Colors.Innocent),
-    Icon = "user-check"
-})
+utilTab:Space()
 
-innocentTab:Section({
-    Title = "Gun System",
-    TextSize = 18,
-    FontWeight = Enum.FontWeight.SemiBold
-})
-
-innocentTab:Toggle({
-    Flag = "AutoGrabGun",
-    Title = "Auto Grab Gun",
-    Desc = "Automatically collect dropped gun",
-    Default = false,
-    Callback = function(value)
-        autoGrabGun = value
-        if value then
-            task.spawn(function()
-                while autoGrabGun do
-                    GrabGun()
-                    task.wait(5)
-                end
-            end)
-            Window:Notify({
-                Title = "Auto Grab Gun",
-                Content = "Auto grab enabled!",
-                Icon = "check-circle",
-                Duration = 3
-            })
-        else
-            Window:Notify({
-                Title = "Auto Grab Gun",
-                Content = "Auto grab disabled",
-                Icon = "x-circle",
-                Duration = 3
-            })
-        end
+utilTab:Button({
+    Title = "Rejoin Server",
+    Icon = "refresh-cw",
+    Color = Colors.Blue,
+    Justify = "Center",
+    Callback = function()
+        Rejoin()
     end
 })
 
-innocentTab:Space()
+utilTab:Space()
 
-innocentTab:Button({
-    Title = "Grab Gun Manually",
+utilTab:Button({
+    Title = "Server Hop",
+    Icon = "shuffle",
+    Color = Colors.DarkPurple,
+    Justify = "Center",
+    Callback = function()
+        ServerHop()
+    end
+})
+
+utilTab:Space()
+
+utilTab:Button({
+    Title = "Grab Gun",
     Icon = "hand",
     Color = Colors.Toxic,
     Justify = "Center",
     Callback = function()
         GrabGun()
-    end
-})
-
--- Murder Tab
-local murderTab = mainTab:Tab({
-    Title = GradientText("Murder", Colors.Blood, Colors.Murder),
-    Icon = "skull"
-})
-
-murderTab:Section({
-    Title = "Kill Functions",
-    TextSize = 18,
-    FontWeight = Enum.FontWeight.SemiBold
-})
-
-murderTab:Toggle({
-    Flag = "KillAll",
-    Title = "Kill All Players",
-    Desc = "Automatically attack nearby targets",
-    Default = false,
-    Callback = function(value)
-        killAllActive = value
-        Window:Notify({
-            Title = "Kill All",
-            Content = value and "Kill mode enabled!" or "Kill mode disabled",
-            Icon = value and "skull" or "shield-off",
-            Duration = 3
-        })
     end
 })
 
@@ -2200,7 +2586,7 @@ infoTab:Section({
 infoTab:Space()
 
 infoTab:Section({
-    Title = "Player ESP • Auto Farm • Underground Farm • Character Mods • Teleportation • Weapon Spawner • Weapon Duplication • Visual Weapons • Trade Scam • Role Functions • Anti-AFK • Server Utilities",
+    Title = "Player ESP • Auto Farm • Character Mods • Teleportation • Weapon Spawner • Weapon Duplication • Visual Weapons • Trade Scam • Role Functions • Anti-AFK • Aimbot • Silent Aim • Fly • Noclip • Infinite Jump • Spectate",
     TextSize = 15,
     TextTransparency = 0.4,
     FontWeight = Enum.FontWeight.Medium
@@ -2237,7 +2623,7 @@ Window.CurrentConfig:Save()
 
 Window:Notify({
     Title = GradientText("Woloko Hub Loaded!", Colors.Woloko, Colors.DarkWoloko),
-    Content = "Welcome to the Premium Edition v2.0! Press G to toggle GUI.",
+    Content = "Welcome to the Premium Edition v3.0! Press G to toggle GUI.",
     Icon = "crown",
     Duration = 5
 })
