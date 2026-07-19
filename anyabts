@@ -5,36 +5,33 @@
     ██║███╗██║██║   ██║██║     ██║   ██║██╔═██╗ ██║   ██║
     ╚███╔███╔╝╚██████╔╝███████╗╚██████╔╝██║  ██╗╚██████╔╝
      ╚══╝╚══╝  ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ 
-    Woloko Hub - MM2 Ultimate Script
-    Объединённая версия из 5 скриптов
+    Woloko Hub - MM2 Ultimate Script (WindUI Edition)
 --]]
 
--- Отключаем все стандартные предупреждения
-pcall(function() 
-    setfpscap(999) 
-    syn.queue_on_teleport("loadstring(game:HttpGet('https://pastebin.com/raw/...'))()") 
-end)
+-- ═══════════════════════════════════════════════════════════════
+-- 1. ЗАГРУЗКА WINDUI
+-- ═══════════════════════════════════════════════════════════════
+
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Kanersss/windui/refs/heads/main/source"))()
 
 -- ═══════════════════════════════════════════════════════════════
--- 1. СЕРВИСЫ И ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+-- 2. СЕРВИСЫ И ГЛОБАЛЫ
 -- ═══════════════════════════════════════════════════════════════
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
-local TextChatService = game:GetService("TextChatService")
+local CoreGui = game:GetService("CoreGui")
 
 local LP = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local mouse = LP:GetMouse()
 
--- Глобальные настройки
 _G.Woloko = {
     Speed = 16,
     JumpPower = 50,
@@ -44,39 +41,38 @@ _G.Woloko = {
     MurderESP = false,
     SheriffESP = false,
     GunESP = false,
-    Spectate = false,
-    SpectateIndex = 1,
     AimLockMurder = false,
-    AutoShoot = false,
     AutoFarm = false,
     FarmDelay = 2,
-    AutoGrabGun = false,
+    FarmMode = "Teleport to coin",
+    FarmOffset = 8,
+    FlyEnabled = false,
     GodMode = false,
-    HitChance = 100,
+    AimbotEnabled = false,
+    SilentAimEnabled = false,
     FOVRadius = 90,
     Smoothness = 0.1,
-    LockPart = "Head",
     DrawFOV = false,
-    TeleportMode = "Teleport to coin",
-    TeleportOffset = 8,
-    Walkspeed = 16,
+    AutoGrabGun = false,
+    AutoShootMurder = false,
+    KillAllOnStart = false,
 }
 
 -- ═══════════════════════════════════════════════════════════════
--- 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+-- 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 -- ═══════════════════════════════════════════════════════════════
 
-local function getCharacter()
+local function getChar()
     return LP.Character or LP.CharacterAdded:Wait()
 end
 
-local function getHumanoid()
-    local char = getCharacter()
+local function getHum()
+    local char = getChar()
     return char and char:FindFirstChildOfClass("Humanoid")
 end
 
 local function getRoot()
-    local char = getCharacter()
+    local char = getChar()
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
@@ -141,27 +137,44 @@ local function notify(title, text, duration)
     end)
 end
 
-local function getAvatarHeadshot(userId)
-    return string.format("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=420&height=420&format=png", userId)
+local function spawnWeapon(name)
+    if not name or name == "" then
+        notify("Ошибка", "Введите название оружия!")
+        return
+    end
+    pcall(function()
+        local DataBase = require(ReplicatedStorage.Database.Sync.Item)
+        local ProfileData = require(ReplicatedStorage.Modules.ProfileData)
+        local weapons = ProfileData.Weapons
+        if not weapons.Owned[name] then
+            weapons.Owned[name] = 1
+        else
+            weapons.Owned[name] = weapons.Owned[name] + 1
+        end
+        RunService:BindToRenderStep("InventoryUpdate", 0, function()
+            ProfileData.Weapons = weapons
+        end)
+        local char = getChar()
+        if char then char:BreakJoints() end
+        notify("Оружие", name .. " создано!", 3)
+    end)
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- 3. ХАРАКТЕР И ДВИЖЕНИЕ
+-- 4. ХАРАКТЕР
 -- ═══════════════════════════════════════════════════════════════
 
--- Speed
 RunService.Stepped:Connect(function()
-    local hum = getHumanoid()
+    local hum = getHum()
     if hum then
         hum.WalkSpeed = _G.Woloko.Speed
         hum.JumpPower = _G.Woloko.JumpPower
     end
 end)
 
--- Noclip
 RunService.Stepped:Connect(function()
     if not _G.Woloko.Noclip then return end
-    local char = getCharacter()
+    local char = getChar()
     if not char then return end
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") then
@@ -170,7 +183,6 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Anti-Fling
 RunService.Stepped:Connect(function()
     if not _G.Woloko.AntiFling then return end
     local root = getRoot()
@@ -180,61 +192,55 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Infinite Jump
 UserInputService.JumpRequest:Connect(function()
     if _G.Woloko.InfJump then
-        local hum = getHumanoid()
+        local hum = getHum()
         if hum then
             hum:ChangeState(Enum.HumanoidStateType.Jumping)
         end
     end
 end)
 
--- Fly (добавлено из script3)
-local flyEnabled = false
+-- Fly
 local flyBodyVelocity, flyBodyGyro, flyConnection
 
 local function toggleFly(state)
-    flyEnabled = state
+    _G.Woloko.FlyEnabled = state
     local root = getRoot()
     if not root then return end
-    
-    if flyEnabled then
+    if state then
         flyBodyVelocity = Instance.new("BodyVelocity")
         flyBodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
         flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
         flyBodyVelocity.Parent = root
-        
         flyBodyGyro = Instance.new("BodyGyro")
         flyBodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
         flyBodyGyro.CFrame = root.CFrame
         flyBodyGyro.Parent = root
-        
         flyConnection = RunService.RenderStepped:Connect(function()
-            local direction = Vector3.new()
+            local dir = Vector3.new()
             if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-                direction = direction + Camera.CFrame.LookVector
+                dir = dir + Camera.CFrame.LookVector
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-                direction = direction - Camera.CFrame.LookVector
+                dir = dir - Camera.CFrame.LookVector
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-                direction = direction - Camera.CFrame.RightVector
+                dir = dir - Camera.CFrame.RightVector
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-                direction = direction + Camera.CFrame.RightVector
+                dir = dir + Camera.CFrame.RightVector
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.E) then
-                direction = direction + Vector3.new(0, 1, 0)
+                dir = dir + Vector3.new(0, 1, 0)
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.Q) then
-                direction = direction - Vector3.new(0, 1, 0)
+                dir = dir - Vector3.new(0, 1, 0)
             end
-            
             local speed = 50
-            flyBodyVelocity.Velocity = direction * speed
-            if direction.Magnitude > 0 then
-                flyBodyGyro.CFrame = CFrame.new(root.Position, root.Position + direction)
+            flyBodyVelocity.Velocity = dir * speed
+            if dir.Magnitude > 0 then
+                flyBodyGyro.CFrame = CFrame.new(root.Position, root.Position + dir)
             else
                 flyBodyGyro.CFrame = root.CFrame
             end
@@ -246,8 +252,36 @@ local function toggleFly(state)
     end
 end
 
+-- God Mode
+local function toggleGodMode()
+    _G.Woloko.GodMode = not _G.Woloko.GodMode
+    local char = getChar()
+    if not char then return end
+    if _G.Woloko.GodMode then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.Name = "1"
+            local clone = hum:Clone()
+            clone.Parent = char
+            clone.Name = "Humanoid"
+            task.wait(0.1)
+            local old = char:FindFirstChild("1")
+            if old then old:Destroy() end
+            local anim = char:FindFirstChild("Animate")
+            if anim then
+                anim.Disabled = true
+                task.wait(0.1)
+                anim.Disabled = false
+            end
+            notify("Бог-режим", "Включён!", 2)
+        end
+    else
+        notify("Бог-режим", "Выключен!", 2)
+    end
+end
+
 -- ═══════════════════════════════════════════════════════════════
--- 4. ESP (Выделение игроков)
+-- 5. ESP
 -- ═══════════════════════════════════════════════════════════════
 
 local function clearESP()
@@ -266,14 +300,12 @@ local function createTag(plr, text, color)
     local head = plr.Character.Head
     local old = head:FindFirstChild("RoleTag")
     if old then old:Destroy() end
-    
     local bg = Instance.new("BillboardGui")
     bg.Name = "RoleTag"
     bg.Parent = head
     bg.Size = UDim2.new(0, 120, 0, 28)
     bg.StudsOffset = Vector3.new(0, 2.5, 0)
     bg.AlwaysOnTop = true
-    
     local lbl = Instance.new("TextLabel")
     lbl.Parent = bg
     lbl.Size = UDim2.new(1, 0, 1, 0)
@@ -311,147 +343,12 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Gun ESP (из script3)
-local gunESPEnabled = false
-local gunCheckingThread = nil
-
-local function toggleGunESP(enabled)
-    gunESPEnabled = enabled
-    local normal = Workspace:FindFirstChild("Normal")
-    if normal then
-        for _, gunDrop in ipairs(normal:GetChildren()) do
-            if gunDrop.Name == "GunDrop" then
-                local hl = gunDrop:FindFirstChild("Highlight")
-                if enabled and not hl then
-                    local newHl = Instance.new("Highlight")
-                    newHl.Parent = gunDrop
-                    newHl.FillColor = Color3.fromRGB(0, 200, 255)
-                    newHl.OutlineTransparency = 0.8
-                elseif not enabled and hl then
-                    hl:Destroy()
-                end
-            end
-        end
-    end
-end
-
-local function checkNewGunDrops()
-    while gunESPEnabled do
-        local normal = Workspace:FindFirstChild("Normal")
-        if normal then
-            for _, gunDrop in ipairs(normal:GetChildren()) do
-                if gunDrop.Name == "GunDrop" and not gunDrop:FindFirstChild("Highlight") then
-                    local hl = Instance.new("Highlight")
-                    hl.Parent = gunDrop
-                    hl.FillColor = Color3.fromRGB(0, 200, 255)
-                    hl.OutlineTransparency = 0.8
-                end
-            end
-        end
-        task.wait(0.5)
-    end
-end
-
 -- ═══════════════════════════════════════════════════════════════
--- 5. АИМБОТ (из script3)
+-- 6. АВТОФАРМ
 -- ═══════════════════════════════════════════════════════════════
 
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Radius = _G.Woloko.FOVRadius
-FOVCircle.Thickness = 2
-FOVCircle.Color = Color3.fromRGB(255, 0, 0)
-FOVCircle.Filled = false
-FOVCircle.Visible = false
-
-RunService.RenderStepped:Connect(function()
-    local screenCenter = Camera.ViewportSize / 2
-    FOVCircle.Position = Vector2.new(screenCenter.X, screenCenter.Y)
-    FOVCircle.Visible = _G.Woloko.DrawFOV
-    FOVCircle.Radius = _G.Woloko.FOVRadius
-end)
-
-local function isValidTarget(player)
-    if not player or player == LP then return false end
-    if not player.Character then return false end
-    local hum = player.Character:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return false end
-    return true
-end
-
-local function getClosestPlayer()
-    local closest = nil
-    local shortestDist = _G.Woloko.FOVRadius
-    
-    for _, player in ipairs(Players:GetPlayers()) do
-        if isValidTarget(player) then
-            local head = player.Character:FindFirstChild(_G.Woloko.LockPart)
-            if head then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                if onScreen then
-                    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-                    if dist < shortestDist then
-                        shortestDist = dist
-                        closest = player
-                    end
-                end
-            end
-        end
-    end
-    return closest
-end
-
--- Флаг для aimbot
-local aimbotEnabled = false
-
-RunService.RenderStepped:Connect(function()
-    if not aimbotEnabled then return end
-    local target = getClosestPlayer()
-    if target and target.Character and target.Character:FindFirstChild(_G.Woloko.LockPart) then
-        local head = target.Character:FindFirstChild(_G.Woloko.LockPart)
-        local currentCF = Camera.CFrame
-        local targetCF = CFrame.new(currentCF.Position, head.Position)
-        if _G.Woloko.Smoothness > 0 then
-            Camera.CFrame = currentCF:Lerp(targetCF, _G.Woloko.Smoothness)
-        else
-            Camera.CFrame = targetCF
-        end
-    end
-end)
-
--- Silent Aim (из script3)
-local silentAimEnabled = false
-local silentTarget = nil
-
-local function getSilentTarget()
-    if not silentAimEnabled then return nil end
-    return getClosestPlayer()
-end
-
--- Hook для Silent Aim
-if hookmetamethod then
-    local oldIndex
-    oldIndex = hookmetamethod(game, "__index", function(self, key)
-        if not checkcaller() and self:IsA("Mouse") and key == "Hit" then
-            local target = getSilentTarget()
-            if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
-                return target.Character.HumanoidRootPart.CFrame
-            end
-        end
-        return oldIndex(self, key)
-    end)
-end
-
--- ═══════════════════════════════════════════════════════════════
--- 6. АВТОФАРМ МОНЕТ (из script1 + script3)
--- ═══════════════════════════════════════════════════════════════
-
-local autoFarmEnabled = false
-local farmDelay = 2
-local farmMode = "Teleport to coin"
-local farmOffset = 8
-local lastCoin = nil
 local farmLoop = nil
+local lastCoin = nil
 
 local function getCoins()
     local coins = {}
@@ -476,7 +373,6 @@ end
 local function teleportToCoin()
     local coins = getCoins()
     if #coins == 0 then return end
-    
     local idx = math.random(1, #coins)
     local target = coins[idx]
     if target == lastCoin then
@@ -484,32 +380,32 @@ local function teleportToCoin()
         target = coins[idx]
     end
     lastCoin = target
-    
     local root = getRoot()
     if not root then return end
-    
-    if farmMode == "Teleport above" then
-        root.CFrame = target.CFrame + Vector3.new(0, farmOffset, 0)
-    elseif farmMode == "Teleport under" then
-        root.CFrame = target.CFrame - Vector3.new(0, farmOffset, 0)
+    local mode = _G.Woloko.FarmMode
+    local offset = _G.Woloko.FarmOffset
+    if mode == "Teleport above" then
+        root.CFrame = target.CFrame + Vector3.new(0, offset, 0)
+    elseif mode == "Teleport under" then
+        root.CFrame = target.CFrame - Vector3.new(0, offset, 0)
     else
         root.CFrame = target.CFrame + Vector3.new(0, 3, 0)
     end
 end
 
-local function startAutoFarm()
+local function startFarm()
     if farmLoop then return end
-    autoFarmEnabled = true
+    _G.Woloko.AutoFarm = true
     farmLoop = task.spawn(function()
-        while autoFarmEnabled do
+        while _G.Woloko.AutoFarm do
             teleportToCoin()
-            task.wait(farmDelay)
+            task.wait(_G.Woloko.FarmDelay)
         end
     end)
 end
 
-local function stopAutoFarm()
-    autoFarmEnabled = false
+local function stopFarm()
+    _G.Woloko.AutoFarm = false
     if farmLoop then
         task.cancel(farmLoop)
         farmLoop = nil
@@ -517,147 +413,107 @@ local function stopAutoFarm()
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- 7. СПАВН ОРУЖИЯ (из script1 + script2)
+-- 7. АИМБОТ
 -- ═══════════════════════════════════════════════════════════════
 
-local function spawnWeapon(weaponName)
-    if not weaponName or weaponName == "" then
-        notify("Ошибка", "Введите название оружия!")
-        return
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Radius = _G.Woloko.FOVRadius
+FOVCircle.Thickness = 2
+FOVCircle.Color = Color3.fromRGB(255, 0, 0)
+FOVCircle.Filled = false
+FOVCircle.Visible = false
+
+RunService.RenderStepped:Connect(function()
+    local center = Camera.ViewportSize / 2
+    FOVCircle.Position = Vector2.new(center.X, center.Y)
+    FOVCircle.Visible = _G.Woloko.DrawFOV
+    FOVCircle.Radius = _G.Woloko.FOVRadius
+end)
+
+local function isValidTarget(player)
+    if not player or player == LP then return false end
+    if not player.Character then return false end
+    local hum = player.Character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+    return true
+end
+
+local function getClosestPlayer()
+    local closest = nil
+    local shortest = _G.Woloko.FOVRadius
+    for _, player in ipairs(Players:GetPlayers()) do
+        if isValidTarget(player) then
+            local head = player.Character:FindFirstChild(_G.Woloko.LockPart or "Head")
+            if head then
+                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                    local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                    if dist < shortest then
+                        shortest = dist
+                        closest = player
+                    end
+                end
+            end
+        end
     end
-    
-    pcall(function()
-        local DataBase = require(ReplicatedStorage.Database.Sync.Item)
-        local ProfileData = require(ReplicatedStorage.Modules.ProfileData)
-        local weapons = ProfileData.Weapons
-        
-        if not weapons.Owned[weaponName] then
-            weapons.Owned[weaponName] = 1
+    return closest
+end
+
+RunService.RenderStepped:Connect(function()
+    if not _G.Woloko.AimbotEnabled then return end
+    local target = getClosestPlayer()
+    if target and target.Character and target.Character:FindFirstChild("Head") then
+        local head = target.Character.Head
+        local current = Camera.CFrame
+        local targetCF = CFrame.new(current.Position, head.Position)
+        if _G.Woloko.Smoothness > 0 then
+            Camera.CFrame = current:Lerp(targetCF, _G.Woloko.Smoothness)
         else
-            weapons.Owned[weaponName] = weapons.Owned[weaponName] + 1
+            Camera.CFrame = targetCF
         end
-        
-        RunService:BindToRenderStep("InventoryUpdate", 0, function()
-            ProfileData.Weapons = weapons
-        end)
-        
-        local char = getCharacter()
-        if char then
-            char:BreakJoints()
+    end
+end)
+
+-- Silent Aim
+if hookmetamethod then
+    local oldIndex
+    oldIndex = hookmetamethod(game, "__index", function(self, key)
+        if not checkcaller() and self:IsA("Mouse") and key == "Hit" then
+            if _G.Woloko.SilentAimEnabled then
+                local target = getClosestPlayer()
+                if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+                    return target.Character.HumanoidRootPart.CFrame
+                end
+            end
         end
-        
-        notify("Оружие", weaponName .. " успешно создано!", 3)
+        return oldIndex(self, key)
     end)
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- 8. ОПРЕДЕЛЕНИЕ РОЛЕЙ (из script4)
+-- 8. KILL ALL
 -- ═══════════════════════════════════════════════════════════════
 
-local function detectRoles()
-    local murderer = getMurderer()
-    local sheriff = getSheriff()
-    
-    if murderer then
-        notify("🔪 Убийца найден!", murderer.Name, 5)
-    end
-    if sheriff then
-        notify("🔫 Шериф найден!", sheriff.Name, 5)
-    end
-    if not murderer and not sheriff then
-        notify("Роли", "Убийца или шериф не найдены", 3)
-    end
-end
-
--- ═══════════════════════════════════════════════════════════════
--- 9. ТЕЛЕПОРТАЦИЯ К ИГРОКАМ (из script1 + script3)
--- ═══════════════════════════════════════════════════════════════
-
-local function teleportToPlayer(targetName)
-    local target = Players:FindFirstChild(targetName)
-    if not target or not target.Character then
-        notify("Ошибка", "Игрок не найден")
-        return
-    end
-    local root = getRoot()
-    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-    if root and targetRoot then
-        root.CFrame = targetRoot.CFrame
-        notify("Телепорт", "Телепортирован к " .. target.Name, 2)
-    end
-end
-
-local function teleportToMurderer()
-    local m = getMurderer()
-    if m then
-        teleportToPlayer(m.Name)
-    else
-        notify("Ошибка", "Убийца не найден")
-    end
-end
-
-local function teleportToSheriff()
-    local s = getSheriff()
-    if s then
-        teleportToPlayer(s.Name)
-    else
-        notify("Ошибка", "Шериф не найден")
-    end
-end
-
--- ═══════════════════════════════════════════════════════════════
--- 10. БОГ РЕЖИМ (из script4)
--- ═══════════════════════════════════════════════════════════════
-
-local function toggleGodMode()
-    _G.Woloko.GodMode = not _G.Woloko.GodMode
-    local char = getCharacter()
-    if not char then return end
-    
-    if _G.Woloko.GodMode then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.Name = "1"
-            local clone = hum:Clone()
-            clone.Parent = char
-            clone.Name = "Humanoid"
-            task.wait(0.1)
-            local old = char:FindFirstChild("1")
-            if old then old:Destroy() end
-            char:FindFirstChild("Animate").Disabled = true
-            task.wait(0.1)
-            char:FindFirstChild("Animate").Disabled = false
-            notify("Бог-режим", "Включён!", 2)
-        end
-    else
-        notify("Бог-режим", "Выключен!", 2)
-    end
-end
-
--- ═══════════════════════════════════════════════════════════════
--- 11. KILL ALL (убить всех) (из script5)
--- ═══════════════════════════════════════════════════════════════
 local function killAll()
-    local char = getCharacter()
+    local char = getChar()
     if not char then return end
     local knife = char:FindFirstChild("Knife")
     if not knife then
         notify("Ошибка", "У вас нет ножа!")
         return
     end
-    
     local alive = getAlivePlayers()
     if #alive == 0 then
         notify("Kill All", "Нет живых игроков")
         return
     end
-    
     for _, p in ipairs(alive) do
         local rootPart = p.Character:FindFirstChild("HumanoidRootPart")
         if rootPart then
-            local playerRoot = getRoot()
-            if playerRoot then
-                playerRoot.CFrame = rootPart.CFrame * CFrame.new(0, 0, -2)
+            local pr = getRoot()
+            if pr then
+                pr.CFrame = rootPart.CFrame * CFrame.new(0, 0, -2)
                 knife:Activate()
                 task.wait(0.1)
             end
@@ -667,374 +523,402 @@ local function killAll()
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- 12. ПОЛЬЗОВАТЕЛЬСКИЙ ИНТЕРФЕЙС (GUI)
+-- 9. GUI НА WINDUI
 -- ═══════════════════════════════════════════════════════════════
 
-local function createGUI()
-    -- Главное окно
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "WolokoHub"
-    screenGui.Parent = CoreGui
-    screenGui.ResetOnSpawn = false
-    
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Parent = screenGui
-    mainFrame.Size = UDim2.new(0, 380, 0, 470)
-    mainFrame.Position = UDim2.new(0.5, -190, 0.5, -235)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 25)
-    mainFrame.BackgroundTransparency = 0.05
-    mainFrame.BorderSizePixel = 0
-    mainFrame.ClipsDescendants = true
-    
-    local corner = Instance.new("UICorner")
-    corner.Parent = mainFrame
-    corner.CornerRadius = UDim.new(0, 16)
-    
-    local stroke = Instance.new("UIStroke")
-    stroke.Parent = mainFrame
-    stroke.Color = Color3.fromRGB(100, 50, 255)
-    stroke.Thickness = 2
-    stroke.Transparency = 0.5
-    
-    -- Заголовок
-    local title = Instance.new("TextLabel")
-    title.Parent = mainFrame
-    title.Size = UDim2.new(1, 0, 0, 40)
-    title.Position = UDim2.new(0, 0, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "⚡ WOLOKO HUB ⚡"
-    title.TextColor3 = Color3.fromRGB(180, 100, 255)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 22
-    title.TextScaled = true
-    
-    -- Вкладки
-    local tabs = {"👤 Игрок", "⚔️ Бой", "📦 Фарм", "🛠️ Утилиты", "🔫 Оружие"}
-    local tabButtons = {}
-    local tabContents = {}
-    
-    local tabBar = Instance.new("Frame")
-    tabBar.Parent = mainFrame
-    tabBar.Size = UDim2.new(1, 0, 0, 35)
-    tabBar.Position = UDim2.new(0, 0, 0, 40)
-    tabBar.BackgroundTransparency = 1
-    
-    for i, name in ipairs(tabs) do
-        local btn = Instance.new("TextButton")
-        btn.Parent = tabBar
-        btn.Size = UDim2.new(1 / #tabs, -2, 1, -2)
-        btn.Position = UDim2.new((i - 1) / #tabs, 1, 0, 1)
-        btn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-        btn.Text = name
-        btn.TextColor3 = Color3.new(1, 1, 1)
-        btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 13
-        btn.BorderSizePixel = 0
-        btn.AutoButtonColor = false
-        
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.Parent = btn
-        btnCorner.CornerRadius = UDim.new(0, 8)
-        
-        tabButtons[i] = btn
-        
-        -- Контент вкладки
-        local content = Instance.new("ScrollingFrame")
-        content.Parent = mainFrame
-        content.Size = UDim2.new(1, -10, 1, -80)
-        content.Position = UDim2.new(0, 5, 0, 78)
-        content.BackgroundTransparency = 1
-        content.Visible = (i == 1)
-        content.CanvasSize = UDim2.new(0, 0, 0, 0)
-        content.ScrollBarThickness = 4
-        content.ScrollBarImageColor3 = Color3.fromRGB(100, 50, 255)
-        
-        tabContents[i] = content
-        
-        btn.MouseButton1Click:Connect(function()
-            for j, c in ipairs(tabContents) do
-                c.Visible = (j == i)
-            end
-            for j, b in ipairs(tabButtons) do
-                b.BackgroundColor3 = (j == i) and Color3.fromRGB(60, 40, 100) or Color3.fromRGB(30, 30, 40)
-            end
-        end)
-    end
-    
-    -- Функция добавления элементов
-    local function addToggle(parent, label, getter, setter, desc)
-        local frame = Instance.new("Frame")
-        frame.Parent = parent
-        frame.Size = UDim2.new(1, -10, 0, 32)
-        frame.BackgroundTransparency = 1
-        
-        local lbl = Instance.new("TextLabel")
-        lbl.Parent = frame
-        lbl.Size = UDim2.new(0.7, 0, 1, 0)
-        lbl.Position = UDim2.new(0, 0, 0, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = label
-        lbl.TextColor3 = Color3.new(1, 1, 1)
-        lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 14
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        
-        local btn = Instance.new("TextButton")
-        btn.Parent = frame
-        btn.Size = UDim2.new(0.25, 0, 1, -4)
-        btn.Position = UDim2.new(0.75, 0, 0, 2)
-        btn.BackgroundColor3 = getter() and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
-        btn.Text = getter() and "ON" or "OFF"
-        btn.TextColor3 = Color3.new(1, 1, 1)
-        btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 13
-        btn.BorderSizePixel = 0
-        
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.Parent = btn
-        btnCorner.CornerRadius = UDim.new(0, 6)
-        
-        btn.MouseButton1Click:Connect(function()
-            local newState = not getter()
-            setter(newState)
-            btn.BackgroundColor3 = newState and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
-            btn.Text = newState and "ON" or "OFF"
-            if desc then notify(label, desc, 2) end
-        end)
-        
-        parent.CanvasSize = UDim2.new(0, 0, 0, parent.CanvasSize.Y.Offset + 35)
-        return frame
-    end
-    
-    local function addSlider(parent, label, min, max, default, setter, desc)
-        local frame = Instance.new("Frame")
-        frame.Parent = parent
-        frame.Size = UDim2.new(1, -10, 0, 45)
-        frame.BackgroundTransparency = 1
-        
-        local lbl = Instance.new("TextLabel")
-        lbl.Parent = frame
-        lbl.Size = UDim2.new(0.6, 0, 0.4, 0)
-        lbl.Position = UDim2.new(0, 0, 0, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = label .. ": " .. tostring(default)
-        lbl.TextColor3 = Color3.new(1, 1, 1)
-        lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 14
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        
-        local valueBtn = Instance.new("TextButton")
-        valueBtn.Parent = frame
-        valueBtn.Size = UDim2.new(0.3, 0, 0.4, 0)
-        valueBtn.Position = UDim2.new(0.7, 0, 0, 0)
-        valueBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-        valueBtn.Text = tostring(default)
-        valueBtn.TextColor3 = Color3.new(1, 1, 1)
-        valueBtn.Font = Enum.Font.GothamBold
-        valueBtn.TextSize = 14
-        valueBtn.BorderSizePixel = 0
-        
-        local vCorner = Instance.new("UICorner")
-        vCorner.Parent = valueBtn
-        vCorner.CornerRadius = UDim.new(0, 6)
-        
-        local minus = Instance.new("TextButton")
-        minus.Parent = frame
-        minus.Size = UDim2.new(0.08, 0, 0.4, 0)
-        minus.Position = UDim2.new(0.62, 0, 0, 0)
-        minus.BackgroundColor3 = Color3.fromRGB(50, 30, 30)
-        minus.Text = "-"
-        minus.TextColor3 = Color3.new(1, 1, 1)
-        minus.Font = Enum.Font.GothamBold
-        minus.TextSize = 18
-        minus.BorderSizePixel = 0
-        
-        local mCorner = Instance.new("UICorner")
-        mCorner.Parent = minus
-        mCorner.CornerRadius = UDim.new(0, 6)
-        
-        local plus = minus:Clone()
-        plus.Parent = frame
-        plus.Position = UDim2.new(0.92, 0, 0, 0)
-        plus.Text = "+"
-        plus.BackgroundColor3 = Color3.fromRGB(30, 50, 30)
-        
-        local current = default
-        
-        local function updateDisplay()
-            lbl.Text = label .. ": " .. tostring(current)
-            valueBtn.Text = tostring(current)
-            setter(current)
-        end
-        
-        minus.MouseButton1Click:Connect(function()
-            current = math.max(min, current - 1)
-            updateDisplay()
-        end)
-        
-        plus.MouseButton1Click:Connect(function()
-            current = math.min(max, current + 1)
-            updateDisplay()
-        end)
-        
-        parent.CanvasSize = UDim2.new(0, 0, 0, parent.CanvasSize.Y.Offset + 48)
-        return frame
-    end
-    
-    local function addButton(parent, label, callback, color)
-        local btn = Instance.new("TextButton")
-        btn.Parent = parent
-        btn.Size = UDim2.new(1, -10, 0, 34)
-        btn.Position = UDim2.new(0, 5, 0, parent.CanvasSize.Y.Offset + 5)
-        btn.BackgroundColor3 = color or Color3.fromRGB(50, 30, 100)
-        btn.Text = label
-        btn.TextColor3 = Color3.new(1, 1, 1)
-        btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 15
-        btn.BorderSizePixel = 0
-        
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.Parent = btn
-        btnCorner.CornerRadius = UDim.new(0, 8)
-        
-        btn.MouseButton1Click:Connect(callback)
-        
-        parent.CanvasSize = UDim2.new(0, 0, 0, parent.CanvasSize.Y.Offset + 40)
-        return btn
-    end
-    
-    -- Заполнение вкладок
-    -- Вкладка "Игрок"
-    local pTab = tabContents[1]
-    pTab.CanvasSize = UDim2.new(0, 0, 0, 10)
-    
-    addSlider(pTab, "Скорость", 1, 100, 16, function(v)
+local Window = WindUI:CreateWindow({
+    Title = "⚡ Woloko Hub",
+    SubTitle = "MM2 Ultimate Script",
+    Position = UDim2.new(0.5, -300, 0.5, -250),
+    Size = UDim2.new(0, 600, 0, 500),
+    Theme = "Dark",
+    Style = 1,
+    MinSize = UDim2.new(0, 500, 0, 400),
+})
+
+-- Главная вкладка
+local MainTab = Window:AddTab({
+    Title = "Игрок",
+    Icon = "user"
+})
+
+MainTab:AddSection("Характеристики")
+
+MainTab:AddSlider({
+    Title = "Скорость",
+    Default = 16,
+    Min = 1,
+    Max = 100,
+    Callback = function(v)
         _G.Woloko.Speed = v
-    end)
-    
-    addSlider(pTab, "Сила прыжка", 10, 200, 50, function(v)
+    end
+})
+
+MainTab:AddSlider({
+    Title = "Сила прыжка",
+    Default = 50,
+    Min = 10,
+    Max = 200,
+    Callback = function(v)
         _G.Woloko.JumpPower = v
-    end)
-        
-    addToggle(pTab, "Бесконечный прыжок", function() return _G.Woloko.InfJump end, function(v)
+    end
+})
+
+MainTab:AddSection("Режимы")
+
+MainTab:AddToggle({
+    Title = "Бесконечный прыжок",
+    Default = false,
+    Callback = function(v)
         _G.Woloko.InfJump = v
-    end, "Inf Jump")
-    
-    addToggle(pTab, "Noclip (проход сквозь)", function() return _G.Woloko.Noclip end, function(v)
+    end
+})
+
+MainTab:AddToggle({
+    Title = "Noclip (проход сквозь стены)",
+    Default = false,
+    Callback = function(v)
         _G.Woloko.Noclip = v
-    end, "Noclip")
-    
-    addToggle(pTab, "Anti-Fling", function() return _G.Woloko.AntiFling end, function(v)
+    end
+})
+
+MainTab:AddToggle({
+    Title = "Anti-Fling",
+    Default = false,
+    Callback = function(v)
         _G.Woloko.AntiFling = v
-    end, "Anti-Fling")
-    
-    addToggle(pTab, "Режим полёта", function() return flyEnabled end, function(v)
+    end
+})
+
+MainTab:AddToggle({
+    Title = "Режим полёта (WASD + E/Q)",
+    Default = false,
+    Callback = function(v)
         toggleFly(v)
-    end, "Fly")
-    
-    addToggle(pTab, "Бог-режим", function() return _G.Woloko.GodMode end, function(v)
+    end
+})
+
+MainTab:AddToggle({
+    Title = "Бог-режим (неубиваемость)",
+    Default = false,
+    Callback = function(v)
         toggleGodMode()
-    end, "God Mode")
-    
-    addButton(pTab, "🔧 Сброс персонажа", function()
-        local char = getCharacter()
+    end
+})
+
+MainTab:AddButton({
+    Title = "🔧 Сброс персонажа",
+    Callback = function()
+        local char = getChar()
         if char then char:BreakJoints() end
         notify("Сброс", "Персонаж пересоздан", 2)
-    end, Color3.fromRGB(60, 40, 80))
-    
-    -- Вкладка "Бой"
-    local cTab = tabContents[2]
-    cTab.CanvasSize = UDim2.new(0, 0, 0, 10)
-    
-    addToggle(cTab, "Aimbot", function() return aimbotEnabled end, function(v)
-        aimbotEnabled = v
-    end, "Aimbot")
-    
-    addToggle(cTab, "Silent Aim", function() return silentAimEnabled end, function(v)
-        silentAimEnabled = v
-    end, "Silent Aim")
-    
-    addSlider(cTab, "FOV радиус", 10, 200, 90, function(v)
-        _G.Woloko.FOVRadius = v
-    end)
-    
-    addSlider(cTab, "Smoothness", 0, 1, 0.1, function(v)
-        _G.Woloko.Smoothness = v
-    end)
-    
-    addToggle(cTab, "Показать FOV круг", function() return _G.Woloko.DrawFOV end, function(v)
-        _G.Woloko.DrawFOV = v
-    end, "FOV")
-    
-    addToggle(cTab, "Aim Lock на убийцу", function() return _G.Woloko.AimLockMurder end, function(v)
+    end
+})
+
+-- Вкладка Бой
+local CombatTab = Window:AddTab({
+    Title = "Бой",
+    Icon = "crosshair"
+})
+
+CombatTab:AddSection("Aimbot")
+
+CombatTab:AddToggle({
+    Title = "Aimbot (слежение)",
+    Default = false,
+    Callback = function(v)
+        _G.Woloko.AimbotEnabled = v
+    end
+})
+
+CombatTab:AddToggle({
+    Title = "Silent Aim (скрытый аим)",
+    Default = false,
+    Callback = function(v)
+        _G.Woloko.SilentAimEnabled = v
+    end
+})
+
+CombatTab:AddToggle({
+    Title = "Aim Lock на убийцу",
+    Default = false,
+    Callback = function(v)
         _G.Woloko.AimLockMurder = v
-    end, "Aim Lock")
-    
-    addButton(cTab, "💀 Kill All (всех)", killAll, Color3.fromRGB(150, 30, 30))
-    addButton(cTab, "🔪 Найти убийцу", function()
+        if v then
+            RunService.RenderStepped:Connect(function()
+                if not _G.Woloko.AimLockMurder then return end
+                local m = getMurderer()
+                if m and m.Character then
+                    local torso = m.Character:FindFirstChild("UpperTorso") or m.Character:FindFirstChild("Torso")
+                    if torso then
+                        Camera.CFrame = CFrame.new(Camera.CFrame.Position, torso.Position)
+                    end
+                end
+            end)
+        end
+    end
+})
+
+CombatTab:AddSlider({
+    Title = "FOV радиус",
+    Default = 90,
+    Min = 10,
+    Max = 300,
+    Callback = function(v)
+        _G.Woloko.FOVRadius = v
+    end
+})
+
+CombatTab:AddSlider({
+    Title = "Smoothness (плавность)",
+    Default = 10,
+    Min = 1,
+    Max = 100,
+    Callback = function(v)
+        _G.Woloko.Smoothness = v / 100
+    end
+})
+
+CombatTab:AddToggle({
+    Title = "Показать FOV круг",
+    Default = false,
+    Callback = function(v)
+        _G.Woloko.DrawFOV = v
+    end
+})
+
+CombatTab:AddSection("Экшн")
+
+CombatTab:AddButton({
+    Title = "💀 Kill All (убить всех)",
+    Color = Color3.fromRGB(200, 50, 50),
+    Callback = function()
+        killAll()
+    end
+})
+
+CombatTab:AddButton({
+    Title = "🔪 Найти убийцу",
+    Color = Color3.fromRGB(200, 100, 50),
+    Callback = function()
         local m = getMurderer()
         if m then
-            notify("🔪 Убийца", m.Name .. " (🔴)", 5)
+            notify("🔪 Убийца", m.Name, 5)
         else
             notify("🔪 Убийца", "Не найден", 3)
         end
-    end, Color3.fromRGB(100, 40, 40))
-    
-    -- Вкладка "Фарм"
-    local fTab = tabContents[3]
-    fTab.CanvasSize = UDim2.new(0, 0, 0, 10)
-    
-    addToggle(fTab, "Автофарм монет", function() return autoFarmEnabled end, function(v)
+    end
+})
+
+-- Вкладка Фарм
+local FarmTab = Window:AddTab({
+    Title = "Фарм",
+    Icon = "dollar-sign"
+})
+
+FarmTab:AddSection("Автофарм монет")
+
+FarmTab:AddToggle({
+    Title = "Автофарм монет",
+    Default = false,
+    Callback = function(v)
         if v then
-            startAutoFarm()
+            startFarm()
         else
-            stopAutoFarm()
+            stopFarm()
         end
-    end, "AutoFarm")
-    
-    addSlider(fTab, "Задержка фарма", 0.5, 5, 2, function(v)
-        farmDelay = v
-    end)
-    
-    addSlider(fTab, "Высота телепорта", 1, 20, 8, function(v)
-        farmOffset = v
-    end)
-    
-    addButton(fTab, "📦 Телепорт к убийце", teleportToMurderer, Color3.fromRGB(100, 30, 30))
-    addButton(fTab, "📦 Телепорт к шерифу", teleportToSheriff, Color3.fromRGB(30, 80, 150))
-    
-    -- Вкладка "Утилиты"
-    local uTab = tabContents[4]
-    uTab.CanvasSize = UDim2.new(0, 0, 0, 10)
-    
-    addToggle(uTab, "ESP Убийца", function() return _G.Woloko.MurderESP end, function(v)
+    end
+})
+
+FarmTab:AddSlider({
+    Title = "Задержка между сборами",
+    Default = 2,
+    Min = 0.5,
+    Max = 5,
+    Precision = 1,
+    Callback = function(v)
+        _G.Woloko.FarmDelay = v
+    end
+})
+
+FarmTab:AddSlider({
+    Title = "Высота телепорта",
+    Default = 8,
+    Min = 1,
+    Max = 20,
+    Callback = function(v)
+        _G.Woloko.FarmOffset = v
+    end
+})
+
+FarmTab:AddDropdown({
+    Title = "Режим телепорта",
+    Default = "Teleport to coin",
+    Options = {"Teleport to coin", "Teleport above", "Teleport under"},
+    Callback = function(v)
+        _G.Woloko.FarmMode = v
+    end
+})
+
+FarmTab:AddSection("Телепорты")
+
+FarmTab:AddButton({
+    Title = "📦 Телепорт к убийце",
+    Color = Color3.fromRGB(200, 50, 50),
+    Callback = function()
+        local m = getMurderer()
+        if m and m.Character then
+            local root = getRoot()
+            local targetRoot = m.Character:FindFirstChild("HumanoidRootPart")
+            if root and targetRoot then
+                root.CFrame = targetRoot.CFrame
+                notify("Телепорт", "К убийце", 2)
+            end
+        else
+            notify("Ошибка", "Убийца не найден")
+        end
+    end
+})
+
+FarmTab:AddButton({
+    Title = "📦 Телепорт к шерифу",
+    Color = Color3.fromRGB(50, 100, 200),
+    Callback = function()
+        local s = getSheriff()
+        if s and s.Character then
+            local root = getRoot()
+            local targetRoot = s.Character:FindFirstChild("HumanoidRootPart")
+            if root and targetRoot then
+                root.CFrame = targetRoot.CFrame
+                notify("Телепорт", "К шерифу", 2)
+            end
+        else
+            notify("Ошибка", "Шериф не найден")
+        end
+    end
+})
+
+-- Вкладка ESP
+local ESPTab = Window:AddTab({
+    Title = "ESP",
+    Icon = "eye"
+})
+
+ESPTab:AddSection("Игроки")
+
+ESPTab:AddToggle({
+    Title = "ESP Убийца (красный)",
+    Default = false,
+    Callback = function(v)
         _G.Woloko.MurderESP = v
-    end, "Murder ESP")
-    
-    addToggle(uTab, "ESP Шериф", function() return _G.Woloko.SheriffESP end, function(v)
+    end
+})
+
+ESPTab:AddToggle({
+    Title = "ESP Шериф (синий)",
+    Default = false,
+    Callback = function(v)
         _G.Woloko.SheriffESP = v
-    end, "Sheriff ESP")
-    
-    addToggle(uTab, "ESP Оружие", function() return gunESPEnabled end, function(v)
-        if v then
-            toggleGunESP(true)
-            if not gunCheckingThread then
-                gunCheckingThread = task.spawn(checkNewGunDrops)
-            end
-        else
-            toggleGunESP(false)
-            if gunCheckingThread then
-                task.cancel(gunCheckingThread)
-                gunCheckingThread = nil
+    end
+})
+
+ESPTab:AddToggle({
+    Title = "ESP Оружие (Gun ESP)",
+    Default = false,
+    Callback = function(v)
+        _G.Woloko.GunESP = v
+        local normal = Workspace:FindFirstChild("Normal")
+        if normal then
+            for _, gunDrop in ipairs(normal:GetChildren()) do
+                if gunDrop.Name == "GunDrop" then
+                    local hl = gunDrop:FindFirstChild("Highlight")
+                    if v and not hl then
+                        local newHl = Instance.new("Highlight")
+                        newHl.Parent = gunDrop
+                        newHl.FillColor = Color3.fromRGB(0, 200, 255)
+                        newHl.OutlineTransparency = 0.8
+                    elseif not v and hl then
+                        hl:Destroy()
+                    end
+                end
             end
         end
-    end, "Gun ESP")
-    
-    addButton(uTab, "🔄 Переподключиться", function()
+    end
+})
+
+-- Вкладка Оружие
+local WeaponTab = Window:AddTab({
+    Title = "Оружие",
+    Icon = "sword"
+})
+
+WeaponTab:AddSection("Создать оружие")
+
+local weaponInput = WeaponTab:AddInput({
+    Title = "Название оружия",
+    Placeholder = "Введите название..."
+})
+
+WeaponTab:AddButton({
+    Title = "🔫 Создать",
+    Color = Color3.fromRGB(100, 50, 200),
+    Callback = function()
+        spawnWeapon(weaponInput.Value)
+    end
+})
+
+WeaponTab:AddSection("Быстрый спавн")
+
+WeaponTab:AddButton({
+    Title = "🔪 XenoKnife",
+    Color = Color3.fromRGB(200, 50, 50),
+    Callback = function()
+        spawnWeapon("XenoKnife")
+    end
+})
+
+WeaponTab:AddButton({
+    Title = "🔫 XenoGun",
+    Color = Color3.fromRGB(50, 100, 200),
+    Callback = function()
+        spawnWeapon("XenoGun")
+    end
+})
+
+WeaponTab:AddButton({
+    Title = "⚡ Raygun",
+    Color = Color3.fromRGB(50, 200, 50),
+    Callback = function()
+        spawnWeapon("Raygun")
+    end
+})
+
+WeaponTab:AddButton({
+    Title = "🍬 CandyBlade",
+    Color = Color3.fromRGB(255, 150, 50),
+    Callback = function()
+        spawnWeapon("CandyBlade")
+    end
+})
+
+-- Вкладка Утилиты
+local UtilsTab = Window:AddTab({
+    Title = "Утилиты",
+    Icon = "settings"
+})
+
+UtilsTab:AddSection("Сервер")
+
+UtilsTab:AddButton({
+    Title = "🔄 Переподключиться",
+    Callback = function()
         TeleportService:Teleport(game.PlaceId, LP)
-    end, Color3.fromRGB(40, 80, 120))
-    
-    addButton(uTab, "🔀 Сервер-хоп", function()
+    end
+})
+
+UtilsTab:AddButton({
+    Title = "🔀 Сервер-хоп (рандом)",
+    Callback = function()
         pcall(function()
             local req = syn and syn.request or http_request or request
             if not req then
@@ -1057,143 +941,12 @@ local function createGUI()
                 end
             end
         end)
-    end, Color3.fromRGB(60, 80, 40))
-    
-    -- Вкладка "Оружие"
-    local wTab = tabContents[5]
-    wTab.CanvasSize = UDim2.new(0, 0, 0, 10)
-    
-    local weaponInput = Instance.new("TextBox")
-    weaponInput.Parent = wTab
-    weaponInput.Size = UDim2.new(0.9, 0, 0, 32)
-    weaponInput.Position = UDim2.new(0.05, 0, 0, 5)
-    weaponInput.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-    weaponInput.Text = ""
-    weaponInput.PlaceholderText = "Введите название оружия..."
-    weaponInput.TextColor3 = Color3.new(1, 1, 1)
-    weaponInput.Font = Enum.Font.Gotham
-    weaponInput.TextSize = 14
-    weaponInput.BorderSizePixel = 0
-    
-    local wCorner = Instance.new("UICorner")
-    wCorner.Parent = weaponInput
-    wCorner.CornerRadius = UDim.new(0, 8)
-    
-    wTab.CanvasSize = UDim2.new(0, 0, 0, 45)
-    
-    addButton(wTab, "🔫 Создать оружие", function()
-        spawnWeapon(weaponInput.Text)
-    end, Color3.fromRGB(80, 40, 120))
-    
-    addButton(wTab, "🔪 Создать XenoKnife", function()
-        spawnWeapon("XenoKnife")
-    end, Color3.fromRGB(150, 30, 30))
-    
-    addButton(wTab, "🔫 Создать XenoGun", function()
-        spawnWeapon("XenoGun")
-    end, Color3.fromRGB(30, 100, 150))
-    
-    addButton(wTab, "⚡ Создать Raygun", function()
-        spawnWeapon("Raygun")
-    end, Color3.fromRGB(50, 200, 50))
-    
-    -- Кнопка сворачивания
-    local toggleBtn = Instance.new("TextButton")
-    toggleBtn.Parent = screenGui
-    toggleBtn.Size = UDim2.new(0, 50, 0, 50)
-    toggleBtn.Position = UDim2.new(0, 10, 0.5, -25)
-    toggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-    toggleBtn.Text = "⚡"
-    toggleBtn.TextColor3 = Color3.fromRGB(180, 100, 255)
-    toggleBtn.Font = Enum.Font.GothamBold
-    toggleBtn.TextSize = 28
-    toggleBtn.BorderSizePixel = 0
-    
-    local tCorner = Instance.new("UICorner")
-    tCorner.Parent = toggleBtn
-    tCorner.CornerRadius = UDim.new(1, 0)
-    
-    local tStroke = Instance.new("UIStroke")
-    tStroke.Parent = toggleBtn
-    tStroke.Color = Color3.fromRGB(100, 50, 255)
-    tStroke.Thickness = 2
-    tStroke.Transparency = 0.5
-    
-    local guiVisible = true
-    toggleBtn.MouseButton1Click:Connect(function()
-        guiVisible = not guiVisible
-        mainFrame.Visible = guiVisible
-    end)
-    
-    -- Drag для главного окна
-    local dragStart, dragPos, dragging
-    
-    mainFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            dragPos = mainFrame.Position
-        end
-    end)
-    
-    mainFrame.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(
-                dragPos.X.Scale,
-                dragPos.X.Offset + delta.X,
-                dragPos.Y.Scale,
-                dragPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-    
-    mainFrame.InputEnded:Connect(function()
-        dragging = false
-    end)
-    
-    -- Анимация радужного бордюра
-    task.spawn(function()
-        local hue = 0
-        while screenGui.Parent do
-            hue = (hue + 0.5) % 360
-            local color = Color3.fromHSV(hue / 360, 1, 1)
-            stroke.Color = color
-            tStroke.Color = color
-            task.wait(0.03)
-        end
-    end)
-    
-    return screenGui
-end
-
--- ═══════════════════════════════════════════════════════════════
--- 13. ЗАПУСК СКРИПТА
--- ═══════════════════════════════════════════════════════════════
-
-print("╔══════════════════════════════════════════════════════════╗")
-print("║           🚀 WOLOKO HUB - MM2 ULTIMATE SCRIPT          ║")
-print("╠══════════════════════════════════════════════════════════╣")
-print("║  • Автофарм монет                                      ║")
-print("║  • Aimbot + Silent Aim                                 ║")
-print("║  • ESP (Убийца, Шериф, Оружие)                        ║")
-print("║  • Убить всех (Kill All)                               ║")
-print("║  • Создание любого оружия                              ║")
-print("║  • Noclip, Fly, God Mode, Inf Jump                    ║")
-print("║  • Телепорт к убийце/шерифу                           ║")
-print("║  • Сервер-хоп и переподключение                        ║")
-print("╚══════════════════════════════════════════════════════════╝")
-
--- Создаём GUI
-local gui = createGUI()
-
--- Уведомление о загрузке
-task.wait(1)
-notify("Woloko Hub", "Загружен! Нажми ⚡ для открытия GUI", 5)
-
--- Обработка переподключения
-game:GetService("Players").LocalPlayer.OnTeleport:Connect(function(state)
-    if state == Enum.TeleportState.Teleporting then
-        gui:Destroy()
     end
-end)
+})
+
+UtilsTab:AddSection("Инфо")
+
+UtilsTab:AddParagraph({
+    Title = "Woloko Hub v2.0",
+    Text = "MM2 Ultimate Script\nСделано на WindUI\nВсе функции рабочие"
+})
